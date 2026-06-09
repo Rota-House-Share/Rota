@@ -1,0 +1,15 @@
+# Dependencies
+node_modules/
+
+# Environment variables — NEVER commit these
+.env
+.env.local
+.env.production
+
+# Uploaded files (photos, avatars) — ephemeral, not source code
+backend/uploads/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.log
