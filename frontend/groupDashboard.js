@@ -496,6 +496,17 @@ document.addEventListener('DOMContentLoaded', async () => {
       const creatorIsMe = String(p.created_by) === String(user.id);
       const canCancel = p.status === 'open' && (creatorIsMe || myRole === 'admin');
       const canContribute = p.status === 'open';
+      const canDelete = creatorIsMe || myRole === 'admin';
+      const deleteBtn = canDelete
+        ? `<button id="delete-purchase-btn-${p.id}" onclick="deletePurchase('${p.id}')" title="Delete purchase"
+                   style="background:none;border:none;cursor:pointer;padding:4px;
+                          color:#94a3b8;flex-shrink:0;line-height:0;transition:color .15s;"
+                   onmouseover="this.style.color='#f87171'"
+                   onmouseout="this.style.color='#94a3b8'">
+             <i data-lucide="trash-2" style="width:14px;height:14px;"></i>
+           </button>`
+        : '';
+
       return `
         <div class="purchase-item">
           <div class="purchase-head">
@@ -503,7 +514,10 @@ document.addEventListener('DOMContentLoaded', async () => {
               <span class="purchase-name">${escapeHtml(p.item_name)}</span>
               ${statusChip}
             </div>
-            <span class="purchase-meta">by ${escapeHtml(p.creator_name || 'Unknown')}</span>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span class="purchase-meta">by ${escapeHtml(p.creator_name || 'Unknown')}</span>
+              ${deleteBtn}
+            </div>
           </div>
           ${p.description ? `<p class="purchase-desc">${escapeHtml(p.description)}</p>` : ''}
           <div class="purchase-progress">
@@ -520,6 +534,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           </div>
         </div>`;
     }).join('');
+    if (typeof lucide !== 'undefined') lucide.createIcons();
   }
 
   window.openPurchaseModal = () => {
@@ -589,6 +604,26 @@ document.addEventListener('DOMContentLoaded', async () => {
       await loadPurchases();
     } catch (err) {
       toast(err.message || 'Could not cancel', 'error');
+    }
+  };
+  window.deletePurchase = async (purchaseId) => {
+    if (!confirm('Delete this purchase? This cannot be undone.')) return;
+    const btn = document.getElementById(`delete-purchase-btn-${purchaseId}`);
+    if (btn) {
+      btn.disabled = true;
+      btn.style.opacity = '0.5';
+    }
+    try {
+      await apiFetch(`/households/${householdId}/purchases/${purchaseId}`, { method: 'DELETE' });
+      toast('Purchase deleted', 'success');
+      purchases = purchases.filter(p => String(p.id) !== String(purchaseId));
+      renderPurchases();
+    } catch (err) {
+      toast(err.message || 'Could not delete purchase', 'error');
+      if (btn) {
+        btn.disabled = false;
+        btn.style.opacity = '1';
+      }
     }
   };
   loadPurchases();
@@ -703,6 +738,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         case 'PURCHASE_CREATED':
         case 'PURCHASE_UPDATED':
         case 'PURCHASE_CANCELLED':
+        case 'PURCHASE_DELETED':
           try { await loadPurchases(); } catch (_) {}
           break;
       }

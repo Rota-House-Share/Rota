@@ -190,4 +190,29 @@ const cancelPurchase = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { listPurchases, createPurchase, contributeToPurchase, cancelPurchase };
+// DELETE /api/households/:householdId/purchases/:purchaseId
+// Creator-only (or admin).
+const deletePurchase = async (req, res, next) => {
+  const { householdId, purchaseId } = req.params;
+  try {
+    const p = await pool.query(
+      'SELECT created_by FROM purchases WHERE id = $1 AND household_id = $2',
+      [purchaseId, householdId]
+    );
+    if (p.rows.length === 0) {
+      return res.status(404).json({ error: 'Purchase not found.' });
+    }
+
+    const isCreator = String(p.rows[0].created_by) === String(req.user.id);
+    const isAdmin = req.householdRole === 'admin';
+    if (!isCreator && !isAdmin) {
+      return res.status(403).json({ error: 'Only the creator or an admin can delete this purchase.' });
+    }
+
+    await pool.query('DELETE FROM purchases WHERE id = $1', [purchaseId]);
+    broadcast(householdId, { type: 'PURCHASE_DELETED', purchaseId });
+    res.json({ message: 'Purchase deleted' });
+  } catch (err) { next(err); }
+};
+
+module.exports = { listPurchases, createPurchase, contributeToPurchase, cancelPurchase, deletePurchase };

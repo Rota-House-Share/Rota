@@ -13,9 +13,8 @@ const {
 const { createTask, getTasks } = require('../controllers/taskController');
 const { createBill, getBills, getBillSummary } = require('../controllers/billController');
 const {
-  createPurchase, listPurchases, contributeToPurchase, cancelPurchase
+  createPurchase, listPurchases, contributeToPurchase, cancelPurchase, deletePurchase
 } = require('../controllers/purchaseController');
-
 router.use(authenticate);
 
 // Leaderboard must come BEFORE /:householdId to avoid param collision
@@ -74,5 +73,6 @@ router.get ('/:householdId/purchases',                        requireHouseholdMe
 router.post('/:householdId/purchases',                        requireHouseholdMember, createPurchase);
 router.post('/:householdId/purchases/:purchaseId/contribute', requireHouseholdMember, contributeToPurchase);
 router.post('/:householdId/purchases/:purchaseId/cancel',     requireHouseholdMember, cancelPurchase);
+router.delete('/:householdId/purchases/:purchaseId',          requireHouseholdMember, deletePurchase);
 
 module.exports = router;
