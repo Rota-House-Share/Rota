@@ -18,6 +18,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   let purchases = [];
   let myRole    = 'member';
   let currentChoreTab = 'pending';
+  const pendingProofs = {};
 
   // =========================================================================
   // HOUSEHOLD + MEMBERS
@@ -86,30 +87,42 @@ document.addEventListener('DOMContentLoaded', async () => {
   function renderChores() {
     const list = document.getElementById('choreList');
     if (!list) return;
-    // Use my_status (per-user) for tab filtering — not the overall task status.
-    // This means each person sees tasks in Done/To Do based on THEIR own completion.
-    const filtered = tasks.filter(t => {
-      const s = t.my_status || t.status || 'pending';
+
+    // Admins see all tasks. Regular users only see tasks assigned to them.
+    const visible = myRole === 'admin'
+      ? tasks
+      : tasks.filter(t => t.am_assigned === true);
+
+    const filtered = visible.filter(t => {
+      // Admins aren't assigned so use overall task status; users use their own
+      const s = myRole === 'admin'
+        ? (t.status || 'pending')
+        : (t.my_status || 'pending');
       return currentChoreTab === 'pending' ? s !== 'completed' : s === 'completed';
     });
+
     if (filtered.length === 0) {
       list.innerHTML = '<p style="color:#94a3b8;text-align:center;padding:20px;">No tasks here yet.</p>';
       return;
     }
+
     list.innerHTML = filtered.map(t => {
       const assignees  = Array.isArray(t.assignees) ? t.assignees : [];
-      // Use server-provided per-user fields (from the new getTasks query)
       const myStatus   = t.my_status || 'pending';
       const amAssigned = t.am_assigned === true;
-      const myDone     = myStatus === 'completed';
-      const taskDone   = myDone; // for this user, done = their own row is completed
+      // Admins aren't assigned so use overall task status for the done visual
+      const myDone     = myRole === 'admin'
+        ? (t.status || 'pending') === 'completed'
+        : myStatus === 'completed';
+      const hasProof   = !!pendingProofs[t.id];
 
-      // Who completed it (sorted by completed_at)
+
+      // Who completed (sorted by completed_at)
       const completedBy    = assignees.filter(a => a.completed)
         .sort((a, b) => new Date(a.completed_at) - new Date(b.completed_at));
       const firstCompleter = completedBy.length > 0 ? completedBy[0] : null;
 
-      // Avatar row — green = that person has completed, purple = still pending
+      // Avatar row — green = completed, purple = pending
       const avatarRow = assignees.length > 0
         ? assignees.map(a => `
             <span title="${escapeAttr(a.name)}${a.completed ? ' ✓' : ''}" style="
@@ -122,35 +135,76 @@ document.addEventListener('DOMContentLoaded', async () => {
             </span>`).join('')
         : '<span style="color:#94a3b8;font-size:.8rem;">Unassigned</span>';
 
-      // "Done by X" label — shown on completed tab
       const completionLabel = myDone && firstCompleter
-        ? `<span style="font-size:.75rem;color:#43d9a2;margin-left:4px;">
-             ✓ Done by ${escapeHtml(firstCompleter.name)}
+        ? `<span style="font-size:.75rem;color:#43d9a2;margin-left:4px;">✓ Done by ${escapeHtml(firstCompleter.name)}</span>`
+        : '';
+
+      // Proof photo preview label (after capture, before submit)
+      const proofPreview = hasProof
+        ? `<span style="font-size:.72rem;color:#6c63ff;margin-left:4px;display:flex;align-items:center;gap:3px;">
+             <i data-lucide="image" style="width:11px;height:11px;"></i> Photo ready
            </span>`
         : '';
 
-      // Checkbox — only assigned members can tick
+      // Checkbox — enabled only after photo captured (or if already done)
       const checkClass   = myDone ? 'chore-check checked' : 'chore-check';
       const checkContent = myDone ? '<i data-lucide="check" style="width:14px"></i>' : '';
-      const checkAction  = amAssigned
-        ? `onclick="toggleChore('${t.id}')" style="cursor:pointer;"`
-        : `title="You are not assigned to this task"
-           style="opacity:.35;cursor:not-allowed;"`;
+      let checkAttr = '';
+      if (myDone) {
+        checkAttr = 'style="cursor:default;"';
+      } else if (amAssigned && hasProof) {
+        checkAttr = `onclick="submitTaskCompletion('${t.id}')" style="cursor:pointer;" title="Click to mark complete"`;
+      } else if (amAssigned && !hasProof) {
+        checkAttr = `style="opacity:.35;cursor:not-allowed;" title="Take a photo first"`;
+      } else {
+        checkAttr = `style="opacity:.25;cursor:not-allowed;" title="You are not assigned to this task"`;
+      }
+
+      // Camera icon — only for assigned users on pending tasks
+      const cameraBtn = amAssigned && !myDone
+        ? `<input type="file" accept="image/*" capture="environment"
+                  id="proof-input-${t.id}" style="display:none;"
+                  onchange="handleProofCapture('${t.id}', this)">
+           <button onclick="document.getElementById('proof-input-${t.id}').click()"
+                   id="camera-btn-${t.id}"
+                   title="${hasProof ? 'Retake photo' : 'Take proof photo'}"
+                   style="background:none;border:none;cursor:pointer;padding:4px;
+                          color:${hasProof ? '#43d9a2' : '#6c63ff'};flex-shrink:0;line-height:0;transition:color .15s;">
+             <i data-lucide="${hasProof ? 'image-check' : 'camera'}" style="width:16px;height:16px;"></i>
+           </button>`
+        : '';
+
+      // Admin: photo icon — collect all assignees who uploaded proof
+      const proofsForTask = assignees.filter(a => a.proof_url);
+      if (proofsForTask.length > 0) {
+        window._proofData = window._proofData || {};
+        window._proofData[t.id] = { title: t.title, proofs: proofsForTask };
+      }
+      const proofViewBtn = myRole === 'admin' && proofsForTask.length > 0
+        ? `<button onclick="openProofModal('${t.id}')"
+                   title="View proof photos (${proofsForTask.length})"
+                   style="background:none;border:none;cursor:pointer;padding:4px;
+                          color:#6c63ff;flex-shrink:0;line-height:0;transition:color .15s;"
+                   onmouseover="this.style.color='#4f46e5'"
+                   onmouseout="this.style.color='#6c63ff'">
+             <i data-lucide="images" style="width:16px;height:16px;"></i>
+           </button>`
+        : '';
 
       // Delete button — admins only
       const deleteBtn = myRole === 'admin'
-        ? `<button onclick="deleteChore('${t.id}')" title="Delete task" style="
-              background:none;border:none;cursor:pointer;padding:4px;
-              color:#94a3b8;flex-shrink:0;line-height:0;transition:color .15s;"
-              onmouseover="this.style.color='#f87171'"
-              onmouseout="this.style.color='#94a3b8'">
-            <i data-lucide="trash-2" style="width:14px;height:14px;"></i>
-          </button>`
+        ? `<button onclick="deleteChore('${t.id}')" title="Delete task"
+                   style="background:none;border:none;cursor:pointer;padding:4px;
+                          color:#94a3b8;flex-shrink:0;line-height:0;transition:color .15s;"
+                   onmouseover="this.style.color='#f87171'"
+                   onmouseout="this.style.color='#94a3b8'">
+             <i data-lucide="trash-2" style="width:14px;height:14px;"></i>
+           </button>`
         : '';
 
       return `
-        <div class="chore-item ${taskDone ? 'done' : ''}" data-id="${t.id}">
-          <div class="${checkClass}" ${checkAction}>
+        <div class="chore-item ${myDone ? 'done' : ''}" data-id="${t.id}">
+          <div class="${checkClass}" ${checkAttr}>
             ${checkContent}
           </div>
           <div class="chore-info" style="flex:1;min-width:0;">
@@ -158,13 +212,75 @@ document.addEventListener('DOMContentLoaded', async () => {
             <div class="chore-meta" style="display:flex;align-items:center;gap:3px;margin-top:4px;flex-wrap:wrap;">
               ${avatarRow}
               ${completionLabel}
+              ${proofPreview}
             </div>
           </div>
+          ${cameraBtn}
+          ${proofViewBtn}
           ${deleteBtn}
         </div>`;
     }).join('');
     if (typeof lucide !== 'undefined') lucide.createIcons();
   }
+
+  // ── Proof photo modal (admin only) ───────────────────────────────────────
+  // Inject modal HTML once
+  if (!document.getElementById('proofModal')) {
+    const el = document.createElement('div');
+    el.id = 'proofModal';
+    el.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;align-items:center;justify-content:center;padding:16px;';
+    el.innerHTML = `
+      <div style="background:var(--bg-card,#1e1e2e);border-radius:16px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.4);">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid rgba(255,255,255,.08);position:sticky;top:0;background:var(--bg-card,#1e1e2e);z-index:1;">
+          <span id="proofModalTitle" style="font-size:15px;font-weight:600;color:var(--text-primary,#e2e8f0);"></span>
+          <button onclick="closeProofModal()" style="background:none;border:none;cursor:pointer;color:#94a3b8;font-size:20px;line-height:1;">✕</button>
+        </div>
+        <div id="proofModalBody" style="padding:14px 18px;display:flex;flex-direction:column;gap:16px;"></div>
+      </div>`;
+    document.body.appendChild(el);
+    el.addEventListener('click', e => { if (e.target === el) closeProofModal(); });
+  }
+
+  window.openProofModal = (taskId) => {
+    const data = (window._proofData || {})[taskId];
+    if (!data) return;
+    document.getElementById('proofModalTitle').textContent = data.title;
+    document.getElementById('proofModalBody').innerHTML = data.proofs.map(p => {
+      const completedDate = p.completed_at ? new Date(p.completed_at) : null;
+      const completedStr  = completedDate
+        ? completedDate.toLocaleDateString(undefined, { month:'short', day:'numeric' }) + ' ' +
+          completedDate.toLocaleTimeString(undefined, { hour:'2-digit', minute:'2-digit' })
+        : '—';
+      return `
+        <div style="border:1px solid rgba(255,255,255,.1);border-radius:14px;overflow:hidden;">
+          <div style="width:100%;height:200px;background:rgba(255,255,255,.06);
+                      display:flex;flex-direction:column;align-items:center;justify-content:center;
+                      color:#94a3b8;overflow:hidden;">
+            <img src="${escapeAttr(p.proof_url)}" alt="Proof"
+                 style="width:100%;height:100%;object-fit:cover;display:block;"
+                 onerror="this.style.display='none';this.parentElement.innerHTML='<i data-lucide=&quot;camera&quot; style=&quot;width:32px;height:32px;&quot;></i><span style=&quot;font-size:13px;margin-top:8px;&quot;>Proof photo</span>'">
+          </div>
+          <div style="padding:14px 16px;display:flex;flex-direction:column;gap:10px;">
+            <div style="display:flex;justify-content:space-between;font-size:13px;">
+              <span style="color:#94a3b8;">Assigned to</span>
+              <span style="color:var(--text-primary,#e2e8f0);font-weight:600;">${escapeHtml(p.name)}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;">
+              <span style="color:#94a3b8;">Completed</span>
+              <span style="color:var(--text-primary,#e2e8f0);font-weight:600;">${completedStr}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;">
+              <span style="color:#94a3b8;">Status</span>
+              <span style="color:#43d9a2;font-weight:600;">Done</span>
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+    document.getElementById('proofModal').style.display = 'flex';
+  };
+  window.closeProofModal = () => {
+    document.getElementById('proofModal').style.display = 'none';
+  };
 
   window.deleteChore = async (id) => {
     if (!confirm('Delete this task? This cannot be undone.')) return;
@@ -185,18 +301,57 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderChores();
   };
 
-  // FIX (Bug #1): No more optimistic flip.
-  // Previously we flipped UI state, called the API, then re-fetched.
-  // If the API call silently failed (dead UUID, expired token, local_
-  // prefix task) the refetch reverted the UI, which looked to users
-  // like "nothing happened". Now:
-  //   1. Disable the checkbox so the user can't double-click.
-  //   2. Call the new /toggle endpoint which flips in either direction.
-  //   3. Show a toast with the result (success OR error — no silence).
-  //   4. Re-fetch fresh state so rotation advances are reflected.
-  // If the task was created offline (local_ prefix), skip the network
-  // call and just flip the local task — the server doesn't know it yet.
+  // Called when user captures a photo — stores it locally, enables the checkbox
+  window.handleProofCapture = (id, input) => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    pendingProofs[id] = file;
+    renderChores();
+    input.value = '';
+  };
+
+  // Called when the (now-enabled) checkbox is clicked after photo is captured
+  window.submitTaskCompletion = async (id) => {
+    const file = pendingProofs[id];
+    if (!file) { toast('Take a photo first', 'error'); return; }
+
+    const btn = document.getElementById(`camera-btn-${id}`);
+    if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; }
+
+    try {
+      const form = new FormData();
+      form.append('proof', file);
+
+      const tkn = getToken();
+      const res = await fetch(`/api/tasks/${id}/toggle`, {
+        method: 'PATCH',
+        headers: { Authorization: 'Bearer ' + tkn },
+        body: form
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Upload failed');
+      }
+      const result = await res.json();
+      const { myCompleted, assignees: updatedAssignees } = result;
+
+      delete pendingProofs[id];
+
+      const localTask = tasks.find(t => String(t.id) === String(id));
+      if (localTask) {
+        localTask.my_status = myCompleted ? 'completed' : 'pending';
+        if (Array.isArray(updatedAssignees)) localTask.assignees = updatedAssignees;
+      }
+      renderChores();
+      toast('Task marked complete', 'success');
+    } catch (err) {
+      toast(err.message || 'Could not update task', 'error');
+      if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+    }
+  };
+
   window.toggleChore = async (id) => {
+    // toggleChore is kept for backwards compat (WS undo, local tasks)
     const idx = tasks.findIndex(t => String(t.id) === String(id));
     if (idx === -1) return;
     const task = tasks[idx];
@@ -210,27 +365,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     try {
-      // Server returns { status, myCompleted, assignees }
-      // assignees contains every member's updated completed flag
-      // Assignment user_ids are NEVER changed by this call
       const result = await apiFetch(`/tasks/${id}/toggle`, { method: 'PATCH' });
       if (!result) return;
-
       const { myCompleted, assignees: updatedAssignees } = result;
-
-      // Apply the server's truth directly to the local task —
-      // no re-fetch needed (avoids overwriting with stale data)
       const localTask = tasks.find(t => String(t.id) === String(id));
       if (localTask) {
-        // Update per-user status
         localTask.my_status = myCompleted ? 'completed' : 'pending';
-        // Replace assignees array with server's version (completion flags updated)
-        if (Array.isArray(updatedAssignees)) {
-          localTask.assignees = updatedAssignees;
-        }
+        if (Array.isArray(updatedAssignees)) localTask.assignees = updatedAssignees;
       }
       renderChores();
-      toast(myCompleted ? '✅ Marked done' : 'Marked pending', 'success');
+      toast(myCompleted ? 'Marked done' : 'Marked pending', 'success');
     } catch (err) {
       toast(err.message || 'Could not update task', 'error');
     }
@@ -547,14 +691,15 @@ document.addEventListener('DOMContentLoaded', async () => {
           // and eliminates the "assignee rotation" bug caused by re-fetches.
           const localTask = tasks.find(t => String(t.id) === String(msg.taskId));
           if (localTask && Array.isArray(msg.assignees)) {
-            // Replace assignees with updated completion states
             localTask.assignees = msg.assignees;
-            // Update this user's my_status from their entry in the updated array
+            // Update overall status (used by admin view)
+            if (msg.status) localTask.status = msg.status;
+            // Update this user's personal status
             const myEntry = msg.assignees.find(a => String(a.id) === String(user.id));
             if (myEntry) {
               localTask.my_status = myEntry.completed ? 'completed' : 'pending';
+              localTask.my_proof_url = myEntry.proof_url || null;
             }
-            // am_assigned doesn't change — completion never changes assignment
           }
           renderChores();
           break;

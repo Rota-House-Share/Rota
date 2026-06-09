@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rota | Requests</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@latest"></script>
+<link rel="stylesheet" href="groupDashboard.css">
+<style>
+  .requests-content {
+    margin-left: 80px;
+    padding: 36px 40px;
+    min-height: 100vh;
+    background: var(--bg);
+  }
+
+  .page-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 28px;
+  }
+  .page-header h1 { font-size: 1.6rem; font-weight: 800; }
+  .page-header p  { color: var(--text-sub); font-size: .9rem; margin-top: 2px; }
+
+  .btn-new {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--primary); color: #fff;
+    border: none; border-radius: 12px;
+    padding: 11px 20px; font-size: .9rem; font-weight: 700;
+    cursor: pointer; font-family: inherit; transition: opacity .15s;
+  }
+  .btn-new:hover { opacity: .88; }
+
+  .req-tabs {
+    display: flex; gap: 4px; background: var(--white);
+    border: 1px solid var(--border); border-radius: 14px;
+    padding: 5px; margin-bottom: 22px; width: fit-content;
+  }
+  .req-tab {
+    padding: 9px 22px; border-radius: 10px; border: none;
+    font-size: .88rem; font-weight: 700; cursor: pointer;
+    background: transparent; color: var(--text-sub);
+    transition: all .2s; font-family: inherit;
+  }
+  .req-tab.active { background: var(--primary); color: #fff; }
+
+  .filter-row { display: flex; gap: 8px; margin-bottom: 20px; }
+  .chip {
+    padding: 6px 16px; border-radius: 20px; font-size: .8rem; font-weight: 600;
+    border: 1.5px solid var(--border); background: var(--white); cursor: pointer;
+    color: var(--text-sub); transition: all .15s; font-family: inherit;
+  }
+  .chip.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+  .cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px;
+  }
+
+  .request-card {
+    background: var(--white); border: 1px solid var(--border);
+    border-radius: 16px; padding: 18px; cursor: pointer;
+    transition: box-shadow .15s, transform .15s;
+  }
+  .request-card:hover { box-shadow: 0 4px 20px rgba(99,102,241,.1); transform: translateY(-2px); }
+
+  .card-top { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 10px; }
+  .card-id  { font-size: .72rem; color: var(--text-sub); font-weight: 600; }
+
+  .badge {
+    font-size: .7rem; font-weight: 700; padding: 3px 10px; border-radius: 20px;
+    text-transform: uppercase; letter-spacing: .04em;
+  }
+  .badge-progress { background: #dbeafe; color: #1d4ed8; }
+  .badge-resolved { background: #dcfce7; color: #15803d; }
+
+  .card-title { font-size: 1rem; font-weight: 700; margin-bottom: 6px; }
+  .card-desc {
+    font-size: .83rem; color: var(--text-sub); line-height: 1.5;
+    overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    margin-bottom: 12px;
+  }
+  .card-footer { display: flex; align-items: center; justify-content: space-between; }
+  .card-cat  { font-size: .72rem; background: #ede9ff; color: var(--primary); padding: 3px 10px; border-radius: 20px; font-weight: 600; }
+  .card-date { font-size: .72rem; color: var(--text-sub); }
+
+  .empty { text-align: center; padding: 80px 20px; color: var(--text-sub); grid-column: 1/-1; }
+  .empty .empty-icon { font-size: 3rem; margin-bottom: 12px; }
+  .empty p { font-size: .95rem; }
+
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 300; display: none; }
+  .overlay.open { display: block; }
+
+  .sheet {
+    position: fixed; top: 0; right: -480px; width: 460px; height: 100vh;
+    background: var(--white); z-index: 301;
+    box-shadow: -4px 0 30px rgba(0,0,0,.12);
+    transition: right .3s cubic-bezier(.32,0,.67,0);
+    overflow-y: auto; display: flex; flex-direction: column;
+  }
+  .sheet.open { right: 0; }
+
+  .sheet-handle-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 22px 24px 16px; border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; background: var(--white); z-index: 1;
+  }
+  .sheet-handle-bar h2 { font-size: 1.1rem; font-weight: 800; }
+  .sheet-close { background: none; border: none; cursor: pointer; color: var(--text-sub); padding: 4px; border-radius: 8px; }
+  .sheet-close:hover { background: var(--bg); }
+  .sheet-body { padding: 24px; flex: 1; }
+
+  .type-toggle { display: flex; background: var(--bg); border-radius: 12px; padding: 4px; margin-bottom: 20px; }
+  .type-btn {
+    flex: 1; padding: 10px; border: none; background: transparent; border-radius: 8px;
+    font-weight: 700; font-size: .88rem; cursor: pointer; color: var(--text-sub);
+    transition: all .2s; font-family: inherit;
+  }
+  .type-btn.active { background: var(--white); color: var(--primary); box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+
+  .form-group { margin-bottom: 18px; }
+  .form-label { display: block; font-size: .82rem; font-weight: 700; margin-bottom: 6px; }
+  .form-input, .form-select, .form-textarea {
+    width: 100%; padding: 11px 14px; border: 1.5px solid var(--border);
+    border-radius: 10px; font-size: .9rem; background: var(--white);
+    color: var(--text-main); outline: none; transition: border-color .15s;
+    font-family: inherit;
+  }
+  .form-input:focus, .form-select:focus, .form-textarea:focus { border-color: var(--primary); }
+  .form-textarea { resize: none; height: 100px; }
+  .form-select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2364748b' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 14px center; padding-right: 36px;
+  }
+
+  .btn-submit {
+    width: 100%; padding: 14px; background: var(--primary); color: #fff;
+    border: none; border-radius: 12px; font-size: 1rem; font-weight: 700;
+    cursor: pointer; margin-top: 8px; font-family: inherit; transition: opacity .15s;
+  }
+  .btn-submit:hover { opacity: .88; }
+
+  /* ── Photo picker ── */
+  .photo-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .photo-box {
+    width: 80px; height: 80px; border: 2px dashed var(--border); border-radius: 12px;
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+    color: var(--text-sub); font-size: 1.6rem; background: var(--bg);
+    transition: border-color .15s; flex-shrink: 0;
+  }
+  .photo-box:hover { border-color: var(--primary); }
+  .photo-thumb {
+    width: 80px; height: 80px; border-radius: 12px; object-fit: cover;
+    border: 1px solid var(--border); cursor: pointer; position: relative;
+  }
+  .photo-thumb-wrap { position: relative; width: 80px; height: 80px; }
+  .photo-thumb-remove {
+    position: absolute; top: -6px; right: -6px; width: 20px; height: 20px;
+    background: #ef4444; color: #fff; border: none; border-radius: 50%;
+    font-size: .7rem; cursor: pointer; display: flex; align-items: center;
+    justify-content: center; font-weight: 700; line-height: 1;
+  }
+  /* Detail photos */
+  .detail-photos { display: flex; gap: 10px; flex-wrap: wrap; }
+  .detail-photos img { width: 110px; height: 110px; object-fit: cover; border-radius: 10px; border: 1px solid var(--border); cursor: pointer; }
+  .detail-photos img:hover { opacity: .85; }
+
+  .detail-section { margin-bottom: 22px; }
+  .detail-section-title { font-size: .72rem; font-weight: 700; color: var(--text-sub); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 8px; }
+  .detail-desc { font-size: .9rem; line-height: 1.6; }
+
+  .timeline { list-style: none; }
+  .timeline li { display: flex; gap: 12px; padding-bottom: 18px; position: relative; }
+  .timeline li::before { content: ''; position: absolute; left: 9px; top: 20px; bottom: 0; width: 2px; background: var(--border); }
+  .timeline li:last-child::before { display: none; }
+  .tl-dot { width: 20px; height: 20px; border-radius: 50%; background: #ede9ff; border: 2px solid var(--primary); flex-shrink: 0; margin-top: 2px; }
+  .tl-dot.done { background: #22c55e; border-color: #22c55e; }
+  .tl-label { font-size: .85rem; font-weight: 600; }
+  .tl-time  { font-size: .72rem; color: var(--text-sub); margin-top: 2px; }
+
+  .comment-box { display: flex; gap: 10px; margin-top: 10px; }
+  .comment-input { flex: 1; padding: 10px 14px; border: 1.5px solid var(--border); border-radius: 10px; font-size: .88rem; font-family: inherit; outline: none; }
+  .comment-input:focus { border-color: var(--primary); }
+  .comment-send { padding: 10px 18px; background: var(--primary); color: #fff; border: none; border-radius: 10px; font-weight: 700; cursor: pointer; font-family: inherit; }
+</style>
+</head>
+<body>
+
+<nav class="sidebar">
+  <div class="logo-sq">R</div>
+  <div class="nav-links">
+    <a href="Groupdashboard.html" class="nav-item" title="Dashboard"><i data-lucide="layout-dashboard"></i></a>
+    <a href="requests.html" class="nav-item active" title="Requests"><i data-lucide="file-plus"></i></a>
+    <a href="leaderboard.html" class="nav-item" title="Leaderboard"><i data-lucide="trophy"></i></a>
+    <a href="profile.html" class="nav-item" title="Account"><i data-lucide="user"></i></a>
+  </div>
+  <button onclick="window.location.href='Groupdashboard.html'" class="logout-btn" title="Back"><i data-lucide="log-out"></i></button>
+</nav>
+
+<div class="requests-content">
+  <div class="page-header">
+    <div>
+      <h1>Requests</h1>
+      <p>Submit and track maintenance issues &amp; complaints</p>
+    </div>
+    <button class="btn-new" onclick="openNewRequest()">
+      <i data-lucide="plus" style="width:16px;height:16px;"></i>
+      New Request
+    </button>
+  </div>
+
+  <div class="req-tabs">
+    <button class="req-tab active" onclick="switchTab('maintenance',this)">Maintenance</button>
+    <button class="req-tab" onclick="switchTab('complaints',this)">Complaints</button>
+  </div>
+
+  <div class="filter-row">
+    <button class="chip active" onclick="filterCards(this,'In Progress')">In Progress</button>
+    <button class="chip" onclick="filterCards(this,'Completed')">Completed</button>
+  </div>
+
+  <div class="cards-grid" id="cardGrid"></div>
+</div>
+
+<!-- New Request panel -->
+<div class="overlay" id="newOverlay" onclick="closeNewRequest()"></div>
+<div class="sheet" id="newSheet">
+  <div class="sheet-handle-bar">
+    <h2>New Request</h2>
+    <button class="sheet-close" onclick="closeNewRequest()"><i data-lucide="x" style="width:20px;height:20px;"></i></button>
+  </div>
+  <div class="sheet-body">
+    <div class="type-toggle">
+      <button class="type-btn active" id="typeMainBtn" onclick="setFormType('maintenance')">Maintenance</button>
+      <button class="type-btn" id="typeCompBtn" onclick="setFormType('complaints')">Complaint</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Category</label>
+      <select class="form-select" id="formCategory"></select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Title</label>
+      <input class="form-input" id="formTitle" type="text" placeholder="Brief summary of the issue">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Description</label>
+      <textarea class="form-textarea" id="formDesc" placeholder="Describe the issue in detail…"></textarea>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Photos (optional, up to 3)</label>
+      <input type="file" id="photoInput" accept="image/jpeg,image/png,image/webp" multiple style="display:none" onchange="onPhotosSelected(event)">
+      <div class="photo-row" id="photoRow">
+        <div class="photo-box" onclick="document.getElementById('photoInput').click()">＋</div>
+      </div>
+      <div style="font-size:.75rem;color:var(--text-sub);margin-top:6px;">JPEG, PNG or WebP · max 2 MB each</div>
+    </div>
+    <button class="btn-submit" onclick="submitRequest()">Submit Request</button>
+  </div>
+</div>
+
+<!-- Detail panel -->
+<div class="overlay" id="detailOverlay" onclick="closeDetail()"></div>
+<div class="sheet" id="detailSheet">
+  <div id="detailContent"></div>
+</div>
+
+<script>
+const MAINTENANCE_CATS = ['Broken Appliance','Plumbing Issue','Electrical Problem','Furniture Damage','General Repair'];
+const COMPLAINT_CATS   = ['Noise Complaint','Cleanliness Issue','Shared-Space Dispute','Rule Violation','Other'];
+
+const API = window.location.origin + '/api';
+function token()       { return localStorage.getItem('rota_token'); }
+function householdId() { return localStorage.getItem('rota_household_id'); }
+
+if (!token() || !householdId()) window.location.href = 'index.html';
+
+let currentTab   = 'maintenance';
+let activeFilter = 'In Progress';
+let formType     = 'maintenance';
+let isAdmin      = false;
+let allRequests  = { maintenance: [], complaints: [] };
+let selectedFiles = [];
+
+function badgeClass(s) { return s === 'In Progress' ? 'badge-progress' : 'badge-resolved'; }
+function fmtDate(d)    { return new Date(d).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' }); }
+
+// ── Load role ──
+async function loadRole() {
+  try {
+    const res = await fetch(`${API}/households/mine`, { headers: { Authorization: 'Bearer ' + token() } });
+    if (!res.ok) return;
+    const data = await res.json();
+    const hh = Array.isArray(data) ? data.find(h => h.id === householdId()) : data;
+    isAdmin = hh?.role === 'admin';
+  } catch {}
+}
+
+// ── Load requests ──
+async function loadRequests() {
+  try {
+    const res = await fetch(`${API}/requests?householdId=${householdId()}`, {
+      headers: { Authorization: 'Bearer ' + token() }
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    allRequests.maintenance = data.filter(r => r.type === 'maintenance');
+    allRequests.complaints  = data.filter(r => r.type === 'complaint');
+    renderGrid();
+  } catch (err) {
+    console.error('Failed to load requests:', err);
+  }
+}
+
+// ── Render ──
+function renderGrid() {
+  const list = allRequests[currentTab].filter(r => r.status === activeFilter);
+  const el   = document.getElementById('cardGrid');
+  if (!list.length) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">${currentTab === 'maintenance' ? '🔧' : '💬'}</div><p>No ${activeFilter.toLowerCase()} requests yet.</p></div>`;
+    lucide.createIcons();
+    return;
+  }
+  el.innerHTML = list.map(r => `
+    <div class="request-card" onclick="openDetail('${r.id}')">
+      <div class="card-top">
+        <span class="card-id">${r.created_by_name || 'You'} · ${fmtDate(r.created_at)}</span>
+        <span class="badge ${badgeClass(r.status)}">${r.status}</span>
+      </div>
+      <div class="card-title">${r.title}</div>
+      <div class="card-desc">${r.description || ''}</div>
+      <div class="card-footer">
+        <span class="card-cat">${r.category}</span>
+        <span class="card-date">${fmtDate(r.created_at)}</span>
+      </div>
+    </div>
+  `).join('');
+  lucide.createIcons();
+}
+
+function switchTab(tab, btn) {
+  currentTab = tab;
+  activeFilter = 'In Progress';
+  document.querySelectorAll('.req-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.chip').forEach((c, i) => c.classList.toggle('active', i === 0));
+  renderGrid();
+}
+
+function filterCards(btn, filter) {
+  activeFilter = filter;
+  document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+  btn.classList.add('active');
+  renderGrid();
+}
+
+// ── New Request ──
+function openNewRequest() {
+  setFormType(currentTab);
+  document.getElementById('newOverlay').classList.add('open');
+  document.getElementById('newSheet').classList.add('open');
+}
+function closeNewRequest() {
+  document.getElementById('newOverlay').classList.remove('open');
+  document.getElementById('newSheet').classList.remove('open');
+  document.getElementById('formTitle').value    = '';
+  document.getElementById('formDesc').value     = '';
+  document.getElementById('formCategory').value = '';
+  document.getElementById('photoInput').value   = '';
+  selectedFiles = [];
+  renderPhotoRow();
+}
+function setFormType(type) {
+  formType = type;
+  document.getElementById('typeMainBtn').classList.toggle('active', type === 'maintenance');
+  document.getElementById('typeCompBtn').classList.toggle('active', type === 'complaints');
+  const cats = type === 'maintenance' ? MAINTENANCE_CATS : COMPLAINT_CATS;
+  document.getElementById('formCategory').innerHTML =
+    `<option value="">Select category…</option>` + cats.map(c => `<option>${c}</option>`).join('');
+}
+setFormType('maintenance');
+
+// ── Photo picker ──
+function onPhotosSelected(e) {
+  const files = Array.from(e.target.files);
+  const combined = [...selectedFiles, ...files].slice(0, 3); // max 3
+  selectedFiles = combined;
+  renderPhotoRow();
+  // Reset input so same file can be re-selected
+  e.target.value = '';
+}
+
+function removePhoto(idx) {
+  selectedFiles.splice(idx, 1);
+  renderPhotoRow();
+}
+
+function renderPhotoRow() {
+  const row = document.getElementById('photoRow');
+  row.innerHTML = '';
+  selectedFiles.forEach((file, idx) => {
+    const url  = URL.createObjectURL(file);
+    const wrap = document.createElement('div');
+    wrap.className = 'photo-thumb-wrap';
+    wrap.innerHTML = `
+      <img src="${url}" class="photo-thumb" alt="photo ${idx+1}">
+      <button class="photo-thumb-remove" onclick="removePhoto(${idx})">✕</button>
+    `;
+    row.appendChild(wrap);
+  });
+  if (selectedFiles.length < 3) {
+    const box = document.createElement('div');
+    box.className = 'photo-box';
+    box.textContent = '＋';
+    box.onclick = () => document.getElementById('photoInput').click();
+    row.appendChild(box);
+  }
+}
+
+async function submitRequest() {
+  const title = document.getElementById('formTitle').value.trim();
+  const cat   = document.getElementById('formCategory').value;
+  const desc  = document.getElementById('formDesc').value.trim();
+  if (!title || !cat) { alert('Please fill in a title and category.'); return; }
+
+  const form = new FormData();
+  form.append('householdId',  householdId());
+  form.append('type',         formType === 'complaints' ? 'complaint' : 'maintenance');
+  form.append('category',     cat);
+  form.append('title',        title);
+  form.append('description',  desc);
+  selectedFiles.forEach(f => form.append('photos', f));
+
+  try {
+    const res = await fetch(`${API}/requests`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token() },
+      body: form
+    });
+    if (!res.ok) throw new Error(await res.text());
+    closeNewRequest();
+    if (currentTab !== formType) {
+      currentTab = formType;
+      document.querySelectorAll('.req-tab').forEach((b, i) =>
+        b.classList.toggle('active', (i === 0 && formType === 'maintenance') || (i === 1 && formType === 'complaints'))
+      );
+    }
+    showToast('Request submitted');
+  } catch (err) {
+    alert('Failed to submit: ' + err.message);
+  }
+}
+
+// ── Detail ──
+async function openDetail(id) {
+  const r = [...allRequests.maintenance, ...allRequests.complaints].find(x => x.id === id);
+  if (!r) return;
+
+  let comments = [];
+  try {
+    const res = await fetch(`${API}/requests/${id}/comments`, { headers: { Authorization: 'Bearer ' + token() } });
+    if (res.ok) comments = await res.json();
+  } catch {}
+
+  const tl = [
+    { label: 'Request submitted', time: fmtDate(r.created_at), done: true },
+    { label: 'In Progress',       time: 'Being handled',        done: true },
+    { label: 'Completed',         time: r.status === 'Completed' ? 'Done' : 'Pending', done: r.status === 'Completed' },
+  ];
+
+  const commentsHtml = comments.length
+    ? comments.map(c => `
+        <div style="background:var(--bg);border-radius:10px;padding:10px 12px;font-size:.85rem;margin-bottom:8px;">
+          <strong>${c.user_name || 'Unknown'}</strong>: ${c.message}
+          <div style="font-size:.72rem;color:var(--text-sub);margin-top:4px;">${fmtDate(c.created_at)}</div>
+        </div>`).join('')
+    : '<p style="font-size:.82rem;color:var(--text-sub);margin-bottom:8px;">No comments yet.</p>';
+
+  document.getElementById('detailContent').innerHTML = `
+    <div class="sheet-handle-bar">
+      <div>
+        <div style="font-size:.72rem;color:var(--text-sub);margin-bottom:2px;">Submitted by ${r.created_by_name || 'You'}</div>
+        <h2>${r.title}</h2>
+      </div>
+      <button class="sheet-close" onclick="closeDetail()"><i data-lucide="x" style="width:20px;height:20px;"></i></button>
+    </div>
+    <div class="sheet-body">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+        <span class="badge ${badgeClass(r.status)}">${r.status}</span>
+        <span class="badge" style="background:#ede9ff;color:var(--primary);">${r.category}</span>
+      </div>
+
+      ${isAdmin ? `
+      <div style="display:flex;gap:10px;align-items:flex-end;margin-bottom:20px;">
+        <div style="flex:1;">
+          <label class="form-label" style="margin-bottom:6px;">Update Status</label>
+          <select class="form-select" onchange="updateStatus('${id}',this.value)">
+            <option ${r.status === 'In Progress' ? 'selected' : ''}>In Progress</option>
+            <option ${r.status === 'Completed'   ? 'selected' : ''}>Completed</option>
+          </select>
+        </div>
+        <button onclick="deleteRequest('${id}')" style="padding:11px 16px;background:#fee2e2;color:#b91c1c;border:none;border-radius:10px;font-weight:700;cursor:pointer;font-family:inherit;">Delete</button>
+      </div>` : ''}
+
+      <div class="detail-section">
+        <div class="detail-section-title">Description</div>
+        <div class="detail-desc">${r.description || 'No description provided.'}</div>
+      </div>
+
+      ${(r.photo_urls && r.photo_urls.length) ? `
+      <div class="detail-section">
+        <div class="detail-section-title">Photos</div>
+        <div class="detail-photos">
+          ${r.photo_urls.map(url => `<img src="${url}" alt="photo" onclick="window.open('${url}','_blank')">`).join('')}
+        </div>
+      </div>` : ''}
+
+      <div class="detail-section">
+        <div class="detail-section-title">Progress</div>
+        <ul class="timeline">
+          ${tl.map(t => `
+            <li>
+              <div class="tl-dot ${t.done ? 'done' : ''}"></div>
+              <div><div class="tl-label">${t.label}</div><div class="tl-time">${t.time}</div></div>
+            </li>`).join('')}
+        </ul>
+      </div>
+
+      <div class="detail-section">
+        <div class="detail-section-title">Comments &amp; Updates</div>
+        ${commentsHtml}
+        <div class="comment-box">
+          <input class="comment-input" id="cInput_${id}" placeholder="Add a comment…">
+          <button class="comment-send" onclick="addComment('${id}')">Send</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.getElementById('detailOverlay').classList.add('open');
+  document.getElementById('detailSheet').classList.add('open');
+  lucide.createIcons();
+}
+
+async function updateStatus(id, status) {
+  try {
+    const res = await fetch(`${API}/requests/${id}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token() },
+      body: JSON.stringify({ status })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    await loadRequests();
+    showToast('Status updated');
+  } catch (err) {
+    alert('Failed: ' + err.message);
+  }
+}
+
+async function deleteRequest(id) {
+  if (!confirm('Delete this request? This cannot be undone.')) return;
+  try {
+    const res = await fetch(`${API}/requests/${id}`, {
+      method: 'DELETE',
+      headers: { Authorization: 'Bearer ' + token() }
+    });
+    if (!res.ok) throw new Error(await res.text());
+    closeDetail();
+    ['maintenance', 'complaints'].forEach(b => {
+      allRequests[b] = allRequests[b].filter(x => x.id !== id);
+    });
+    renderGrid();
+    showToast('Request deleted');
+  } catch (err) {
+    alert('Failed to delete: ' + err.message);
+  }
+}
+
+async function addComment(id) {
+  const inp     = document.getElementById('cInput_' + id);
+  const message = inp.value.trim();
+  if (!message) return;
+  try {
+    await fetch(`${API}/requests/${id}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token() },
+      body: JSON.stringify({ message })
+    });
+    inp.value = '';
+    openDetail(id);
+  } catch {}
+}
+
+function closeDetail() {
+  document.getElementById('detailOverlay').classList.remove('open');
+  document.getElementById('detailSheet').classList.remove('open');
+}
+
+function showToast(msg) {
+  const t = document.createElement('div');
+  t.style.cssText = 'position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:#0f172a;color:#fff;padding:12px 24px;border-radius:12px;font-size:.88rem;font-weight:600;z-index:999;box-shadow:0 4px 20px rgba(0,0,0,.2);';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 2500);
+}
+
+// ── WebSocket ──
+let ws;
+function connectWS() {
+  const wsUrl = `${window.location.origin.replace('http', 'ws')}/ws?token=${token()}&householdId=${householdId()}`;
+  ws = new WebSocket(wsUrl);
+
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    switch (msg.type) {
+      case 'REQUEST_CREATED': {
+        const bucket = msg.request.type === 'maintenance' ? 'maintenance' : 'complaints';
+        allRequests[bucket].unshift(msg.request);
+        renderGrid();
+        break;
+      }
+      case 'REQUEST_STATUS_CHANGED': {
+        ['maintenance', 'complaints'].forEach(b => {
+          const r = allRequests[b].find(x => x.id === msg.requestId);
+          if (r) r.status = msg.status;
+        });
+        renderGrid();
+        if (document.getElementById('detailSheet').classList.contains('open'))
+          openDetail(msg.requestId);
+        break;
+      }
+      case 'REQUEST_COMMENT': {
+        if (document.getElementById('detailSheet').classList.contains('open'))
+          openDetail(msg.requestId);
+        break;
+      }
+      case 'REQUEST_DELETED': {
+        ['maintenance', 'complaints'].forEach(b => {
+          allRequests[b] = allRequests[b].filter(x => x.id !== msg.requestId);
+        });
+        renderGrid();
+        closeDetail();
+        break;
+      }
+    }
+  };
+
+  ws.onclose = () => setTimeout(connectWS, 3000);
+  ws.onerror = () => ws.close();
+}
+
+async function init() {
+  await loadRole();
+  await loadRequests();
+  connectWS();
+}
+
+init();
+lucide.createIcons();
+</script>
+</body>
+</html>
