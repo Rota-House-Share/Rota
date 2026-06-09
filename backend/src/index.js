@@ -37,16 +37,8 @@ const candidatePaths = [
 const frontendPath = candidatePaths.find(p => fs.existsSync(p)) || candidatePaths[0];
 app.use(express.static(frontendPath));
 
-// --- 4. Static uploads (Bug #3): serve files written by multer.
-// Strong caching is fine here since each upload gets a UUID filename — we
-// never overwrite an existing one. immutable = tell the browser to trust
-// the 1-year cache.
-const uploadsPath = path.join(__dirname, '../uploads');
-fs.mkdirSync(uploadsPath, { recursive: true });
-app.use('/uploads', express.static(uploadsPath, {
-  maxAge: '1y',
-  immutable: true
-}));
+// --- 4. Static uploads removed — files now stored on Cloudflare R2.
+// URLs are stored in the DB as full R2 public URLs so no local serving needed.
 
 setupWebSocket(server);
 
@@ -65,7 +57,7 @@ app.get('/', (req, res) => {
 });
 
 app.get('*', (req, res, next) => {
-  if (req.url.startsWith('/api') || req.url.startsWith('/uploads')) return next();
+  if (req.url.startsWith('/api')) return next();
   res.sendFile(path.join(frontendPath, 'loadingscreen.html'), (err) => {
     if (err) {
       console.error('❌ Path error — frontend at:', frontendPath);
@@ -80,5 +72,5 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`✅ Server running on http://localhost:${PORT}`);
   console.log(`📁 Frontend served from: ${frontendPath}`);
-  console.log(`📦 Uploads served from:  ${uploadsPath}`);
+  console.log(`☁️  File storage:         Cloudflare R2 (${process.env.R2_BUCKET_NAME})`);
 });

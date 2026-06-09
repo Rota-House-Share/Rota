@@ -1,47 +1,41 @@
 // =============================================================================
-// UPLOAD CONTROLLER (Bug #3 — PayloadTooLargeError)
+// UPLOAD CONTROLLER
 //
-// Root cause recap: the old profile flow encoded the image as a Base64 data
-// URL and shoved it in a JSON body. A 400KB JPEG becomes ~540KB Base64, which
-// blows past Express's default JSON limit (100KB) and returns
-// PayloadTooLargeError. Raising the limit is the WRONG fix — it lets large
-// blobs through the JSON parser, bloats the DB, kills cache efficiency, and
-// doesn't validate content.
+// All file uploads go to Cloudflare R2 (S3-compatible object storage).
+// multer uses memoryStorage — files are held in RAM just long enough to
+// stream to R2, then the buffer is discarded. Nothing is written to disk.
 //
-// The right fix is multipart/form-data with multer:
-//   - Browser sends raw binary bytes in a multipart request.
-//   - multer writes the file to disk under uploads/avatars/.
-//   - File size cap is enforced at the middleware layer (2 MB).
-//   - MIME type is validated server-side (never trust the client).
-//   - Only the PATH (e.g. /uploads/avatars/<uuid>.jpg) ends up in the
-//     users.avatar_url column — tiny string, fast cache, DB stays lean.
+// Every upload handler:
+//   1. Validates MIME type (server-side, never trust the client)
+//   2. Enforces a 5 MB file size cap
+//   3. Uploads to R2 under the appropriate folder prefix
+//   4. Returns a permanent public URL to store in the database
 // =============================================================================
 
-const path = require('path');
-const fs   = require('fs');
-const multer = require('multer');
+const multer   = require('multer');
 const { randomUUID } = require('crypto');
+const { S3Client, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const pool = require('../db/pool');
 
-const UPLOAD_ROOT   = path.join(__dirname, '../../uploads');
-const AVATAR_DIR    = path.join(UPLOAD_ROOT, 'avatars');
-const REQUEST_DIR   = path.join(UPLOAD_ROOT, 'requests');
-const PROOF_DIR     = path.join(UPLOAD_ROOT, 'proofs');
-const MAX_BYTES     = 5 * 1024 * 1024;  // 5 MB
+// ── R2 client (S3-compatible) ─────────────────────────────────────────────────
+const r2 = new S3Client({
+  region: 'auto',
+  endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+  credentials: {
+    accessKeyId:     process.env.R2_ACCESS_KEY_ID,
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+  },
+});
+
+const BUCKET      = process.env.R2_BUCKET_NAME;
+const PUBLIC_URL  = process.env.R2_PUBLIC_URL; // e.g. https://pub-xxx.r2.dev  (set after enabling public access)
+
+const MAX_BYTES     = 5 * 1024 * 1024;
 const ALLOWED_MIMES = ['image/jpeg', 'image/png', 'image/webp'];
 const ALLOWED_EXT   = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' };
 
-fs.mkdirSync(AVATAR_DIR,  { recursive: true });
-fs.mkdirSync(REQUEST_DIR, { recursive: true });
-fs.mkdirSync(PROOF_DIR,   { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, AVATAR_DIR),
-  filename:    (req, file, cb) => {
-    const ext = ALLOWED_EXT[file.mimetype] || '.bin';
-    cb(null, `${req.user.id}-${randomUUID()}${ext}`);
-  }
-});
+// All multer instances use memory storage — no disk writes
+const memStorage = multer.memoryStorage();
 
 const fileFilter = (req, file, cb) => {
   if (!ALLOWED_MIMES.includes(file.mimetype)) {
@@ -50,107 +44,108 @@ const fileFilter = (req, file, cb) => {
   cb(null, true);
 };
 
+// ── Helper: upload a buffer to R2, return the public URL ─────────────────────
+async function uploadToR2(buffer, mimeType, folder) {
+  const ext = ALLOWED_EXT[mimeType] || '.bin';
+  const key = `${folder}/${randomUUID()}${ext}`;
+  await r2.send(new PutObjectCommand({
+    Bucket:      BUCKET,
+    Key:         key,
+    Body:        buffer,
+    ContentType: mimeType,
+  }));
+  return `${PUBLIC_URL}/${key}`;
+}
+
+// ── Helper: delete a file from R2 by its public URL ──────────────────────────
+async function deleteFromR2(publicUrl) {
+  if (!publicUrl || !PUBLIC_URL || !publicUrl.startsWith(PUBLIC_URL)) return;
+  const key = publicUrl.replace(PUBLIC_URL + '/', '');
+  try {
+    await r2.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key }));
+  } catch (_) {}
+}
+
+// ── Avatar upload ─────────────────────────────────────────────────────────────
 const uploadAvatar = multer({
-  storage,
+  storage:   memStorage,
   fileFilter,
   limits: { fileSize: MAX_BYTES, files: 1 }
 }).single('avatar');
 
-// POST /api/upload/avatar
-// Saves file, updates users.avatar_url, returns { avatar_url } pointing at
-// the public /uploads/... URL the frontend can use directly in <img src>.
 const handleAvatarUpload = (req, res, next) => {
   uploadAvatar(req, res, async (err) => {
     if (err) {
-      if (err.code === 'LIMIT_FILE_SIZE') {
-        return res.status(413).json({ error: 'File too large. Max size is 2 MB.' });
-      }
+      if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'File too large. Max 5 MB.' });
       return res.status(400).json({ error: err.message || 'Upload failed.' });
     }
-    if (!req.file) {
-      return res.status(400).json({ error: 'No file received. Send a multipart form with field "avatar".' });
-    }
+    if (!req.file) return res.status(400).json({ error: 'No file received.' });
 
-    const publicUrl = `/uploads/avatars/${req.file.filename}`;
     try {
-      // Look up the old URL so we can delete the file afterwards
+      const publicUrl = await uploadToR2(req.file.buffer, req.file.mimetype, 'avatars');
+
+      // Delete old avatar from R2
       const prev = await pool.query('SELECT avatar_url FROM users WHERE id = $1', [req.user.id]);
-      const oldUrl = prev.rows[0]?.avatar_url;
+      await deleteFromR2(prev.rows[0]?.avatar_url);
 
       await pool.query(
         'UPDATE users SET avatar_url = $1, updated_at = NOW() WHERE id = $2',
         [publicUrl, req.user.id]
       );
-
-      // Best-effort cleanup of the previous uploaded file (ignore errors)
-      if (oldUrl && oldUrl.startsWith('/uploads/avatars/')) {
-        const oldPath = path.join(UPLOAD_ROOT, oldUrl.replace(/^\/uploads\//, ''));
-        fs.unlink(oldPath, () => {});
-      }
-
       res.json({ avatar_url: publicUrl });
     } catch (dbErr) {
-      // If the DB write fails, delete the orphan we just saved
-      fs.unlink(req.file.path, () => {});
       next(dbErr);
     }
   });
 };
 
-// ── Request photos (up to 3 files, field name: "photos") ──
-const requestPhotoStorage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, REQUEST_DIR),
-  filename:    (req, file, cb) => {
-    const ext = ALLOWED_EXT[file.mimetype] || '.bin';
-    cb(null, `${randomUUID()}${ext}`);
-  }
-});
-
+// ── Request photos (up to 3) ──────────────────────────────────────────────────
 const uploadRequestPhotos = multer({
-  storage:    requestPhotoStorage,
+  storage:   memStorage,
   fileFilter,
   limits: { fileSize: MAX_BYTES, files: 3 }
 }).array('photos', 3);
 
-// Middleware — attaches to POST /api/requests
-// Parses multipart, saves files, puts public URLs on req.photoUrls
 const handleRequestPhotos = (req, res, next) => {
-  uploadRequestPhotos(req, res, (err) => {
+  uploadRequestPhotos(req, res, async (err) => {
     if (err) {
-      if (err.code === 'LIMIT_FILE_SIZE')  return res.status(413).json({ error: 'Each photo must be under 2 MB.' });
+      if (err.code === 'LIMIT_FILE_SIZE')  return res.status(413).json({ error: 'Each photo must be under 5 MB.' });
       if (err.code === 'LIMIT_FILE_COUNT') return res.status(400).json({ error: 'Maximum 3 photos allowed.' });
       return res.status(400).json({ error: err.message || 'Upload failed.' });
     }
-    req.photoUrls = (req.files || []).map(f => `/uploads/requests/${f.filename}`);
-    next();
+    try {
+      const urls = await Promise.all(
+        (req.files || []).map(f => uploadToR2(f.buffer, f.mimetype, 'requests'))
+      );
+      req.photoUrls = urls;
+      next();
+    } catch (uploadErr) {
+      next(uploadErr);
+    }
   });
 };
 
-// ── Proof photo (single file, field name: "proof") ──
-const proofStorage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, PROOF_DIR),
-  filename:    (req, file, cb) => {
-    const ext = ALLOWED_EXT[file.mimetype] || '.bin';
-    cb(null, `${randomUUID()}${ext}`);
-  }
-});
-
+// ── Proof photo (single) ──────────────────────────────────────────────────────
 const uploadProof = multer({
-  storage:    proofStorage,
+  storage:   memStorage,
   fileFilter,
   limits: { fileSize: MAX_BYTES, files: 1 }
 }).single('proof');
 
-// Middleware — attaches to PATCH /api/tasks/:id/toggle
-// Parses multipart, saves file, puts public URL on req.proofUrl
 const handleProofUpload = (req, res, next) => {
-  uploadProof(req, res, (err) => {
+  uploadProof(req, res, async (err) => {
     if (err) {
-      if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'Proof photo must be under 2 MB.' });
+      if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'Proof photo must be under 5 MB.' });
       return res.status(400).json({ error: err.message || 'Upload failed.' });
     }
-    req.proofUrl = req.file ? `/uploads/proofs/${req.file.filename}` : null;
-    next();
+    try {
+      req.proofUrl = req.file
+        ? await uploadToR2(req.file.buffer, req.file.mimetype, 'proofs')
+        : null;
+      next();
+    } catch (uploadErr) {
+      next(uploadErr);
+    }
   });
 };
 
