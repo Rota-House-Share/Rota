@@ -27,7 +27,7 @@ const UPLOAD_ROOT   = path.join(__dirname, '../../uploads');
 const AVATAR_DIR    = path.join(UPLOAD_ROOT, 'avatars');
 const REQUEST_DIR   = path.join(UPLOAD_ROOT, 'requests');
 const PROOF_DIR     = path.join(UPLOAD_ROOT, 'proofs');
-const MAX_BYTES     = 2 * 1024 * 1024;  // 2 MB
+const MAX_BYTES     = 5 * 1024 * 1024;  // 5 MB
 const ALLOWED_MIMES = ['image/jpeg', 'image/png', 'image/webp'];
 const ALLOWED_EXT   = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' };
 

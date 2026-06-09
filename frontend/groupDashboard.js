@@ -117,11 +117,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       const hasProof   = !!pendingProofs[t.id];
 
 
-      // Who completed (sorted by completed_at)
-      const completedBy    = assignees.filter(a => a.completed)
-        .sort((a, b) => new Date(a.completed_at) - new Date(b.completed_at));
-      const firstCompleter = completedBy.length > 0 ? completedBy[0] : null;
-
       // Avatar row — green = completed, purple = pending
       const avatarRow = assignees.length > 0
         ? assignees.map(a => `
@@ -135,8 +130,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             </span>`).join('')
         : '<span style="color:#94a3b8;font-size:.8rem;">Unassigned</span>';
 
-      const completionLabel = myDone && firstCompleter
-        ? `<span style="font-size:.75rem;color:#43d9a2;margin-left:4px;">✓ Done by ${escapeHtml(firstCompleter.name)}</span>`
+      const completionLabel = myDone
+        ? `<span style="font-size:.75rem;color:#43d9a2;margin-left:4px;">✓ Done</span>`
         : '';
 
       // Proof photo preview label (after capture, before submit)
@@ -302,12 +297,22 @@ document.addEventListener('DOMContentLoaded', async () => {
   };
 
   // Called when user captures a photo — stores it locally, enables the checkbox
-  window.handleProofCapture = (id, input) => {
+  const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+
+  window.handleProofCapture = async (id, input) => {
     const file = input.files && input.files[0];
-    if (!file) return;
-    pendingProofs[id] = file;
-    renderChores();
     input.value = '';
+    if (!file) return;
+
+    // Option 1: validate type client-side before doing anything
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      toast('Only JPEG, PNG or WebP photos allowed', 'error');
+      return;
+    }
+
+    const compressed = await compressImage(file);
+    pendingProofs[id] = compressed;
+    renderChores();
   };
 
   // Called when the (now-enabled) checkbox is clicked after photo is captured
@@ -346,37 +351,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       toast('Task marked complete', 'success');
     } catch (err) {
       toast(err.message || 'Could not update task', 'error');
+    } finally {
+      // Option 2: always re-enable the button regardless of outcome
       if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
-    }
-  };
-
-  window.toggleChore = async (id) => {
-    // toggleChore is kept for backwards compat (WS undo, local tasks)
-    const idx = tasks.findIndex(t => String(t.id) === String(id));
-    if (idx === -1) return;
-    const task = tasks[idx];
-
-    // Offline/local task — handle purely in localStorage
-    if (String(id).startsWith('local_')) {
-      task.status = task.status === 'completed' ? 'pending' : 'completed';
-      localStorage.setItem('rota_tasks_' + householdId, JSON.stringify(tasks));
-      renderChores();
-      return;
-    }
-
-    try {
-      const result = await apiFetch(`/tasks/${id}/toggle`, { method: 'PATCH' });
-      if (!result) return;
-      const { myCompleted, assignees: updatedAssignees } = result;
-      const localTask = tasks.find(t => String(t.id) === String(id));
-      if (localTask) {
-        localTask.my_status = myCompleted ? 'completed' : 'pending';
-        if (Array.isArray(updatedAssignees)) localTask.assignees = updatedAssignees;
-      }
-      renderChores();
-      toast(myCompleted ? 'Marked done' : 'Marked pending', 'success');
-    } catch (err) {
-      toast(err.message || 'Could not update task', 'error');
     }
   };
 

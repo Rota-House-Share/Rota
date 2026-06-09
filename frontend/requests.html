@@ -6,6 +6,7 @@
 <title>Rota | Requests</title>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/lucide@latest"></script>
+<script src="utils.js"></script>
 <link rel="stylesheet" href="groupDashboard.css">
 <style>
   .requests-content {
@@ -381,14 +382,24 @@ function setFormType(type) {
 }
 setFormType('maintenance');
 
+const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+
 // ── Photo picker ──
-function onPhotosSelected(e) {
+async function onPhotosSelected(e) {
   const files = Array.from(e.target.files);
-  const combined = [...selectedFiles, ...files].slice(0, 3); // max 3
+  e.target.value = '';
+
+  // Validate types client-side
+  const invalid = files.filter(f => !ALLOWED_TYPES.includes(f.type));
+  if (invalid.length > 0) {
+    showToast('Only JPEG, PNG or WebP photos allowed', 'error');
+    return;
+  }
+
+  const compressed = await Promise.all(files.map(f => compressImage(f)));
+  const combined = [...selectedFiles, ...compressed].slice(0, 3);
   selectedFiles = combined;
   renderPhotoRow();
-  // Reset input so same file can be re-selected
-  e.target.value = '';
 }
 
 function removePhoto(idx) {
