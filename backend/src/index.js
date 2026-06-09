@@ -14,6 +14,7 @@ const householdRoutes    = require('./routes/households');
 const notificationRoutes = require('./routes/notifications');
 const taskRoutes         = require('./routes/tasks');
 const uploadRoutes       = require('./routes/uploads');
+const requestRoutes      = require('./routes/requests');
 const errorHandler       = require('./middleware/errorHandler');
 
 const app    = express();
@@ -56,6 +57,7 @@ app.use('/api/households',    householdRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/tasks',         taskRoutes);
 app.use('/api/upload',        uploadRoutes);
+app.use('/api/requests',      requestRoutes);
 
 // --- 6. Root & Fallback ---
 app.get('/', (req, res) => {

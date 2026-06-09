@@ -138,7 +138,8 @@ const getTasks = async (req, res, next) => {
                  'name',         u.name,
                  'avatar_url',   u.avatar_url,
                  'completed',    tam2.completed,
-                 'completed_at', tam2.completed_at
+                 'completed_at', tam2.completed_at,
+                 'proof_url',    tam2.proof_url
                )
                ORDER BY u.name
              )
@@ -147,7 +148,9 @@ const getTasks = async (req, res, next) => {
              WHERE tam2.assignment_id = ta.id
            ),
            '[]'::json
-         ) AS assignees
+         ) AS assignees,
+
+         tam.proof_url AS my_proof_url
 
        FROM tasks t
        -- Get the latest assignment (most recent created_at)
@@ -218,13 +221,16 @@ const toggleTaskStatus = async (req, res, next) => {
     }
 
     // 3. Flip only the completion fields — user_id is never touched
+    //    Also save proof_url when marking complete (req.proofUrl set by multer middleware)
+    const proofUrl = req.proofUrl || null;
     const flipped = await client.query(
       `UPDATE task_assignment_members
          SET completed    = NOT completed,
-             completed_at = CASE WHEN NOT completed THEN NOW() ELSE NULL END
+             completed_at = CASE WHEN NOT completed THEN NOW() ELSE NULL END,
+             proof_url    = CASE WHEN NOT completed THEN $3 ELSE NULL END
        WHERE assignment_id = $1 AND user_id = $2
-       RETURNING completed, completed_at`,
-      [assignment.id, req.user.id]
+       RETURNING completed, completed_at, proof_url`,
+      [assignment.id, req.user.id, proofUrl]
     );
     const myCompleted = flipped.rows[0].completed;
 
@@ -253,7 +259,8 @@ const toggleTaskStatus = async (req, res, next) => {
          u.name,
          u.avatar_url,
          tam.completed,
-         tam.completed_at
+         tam.completed_at,
+         tam.proof_url
        FROM task_assignment_members tam
        JOIN users u ON u.id = tam.user_id
        WHERE tam.assignment_id = $1

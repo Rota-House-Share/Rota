@@ -25,11 +25,15 @@ const pool = require('../db/pool');
 
 const UPLOAD_ROOT   = path.join(__dirname, '../../uploads');
 const AVATAR_DIR    = path.join(UPLOAD_ROOT, 'avatars');
+const REQUEST_DIR   = path.join(UPLOAD_ROOT, 'requests');
+const PROOF_DIR     = path.join(UPLOAD_ROOT, 'proofs');
 const MAX_BYTES     = 2 * 1024 * 1024;  // 2 MB
 const ALLOWED_MIMES = ['image/jpeg', 'image/png', 'image/webp'];
 const ALLOWED_EXT   = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' };
 
-fs.mkdirSync(AVATAR_DIR, { recursive: true });
+fs.mkdirSync(AVATAR_DIR,  { recursive: true });
+fs.mkdirSync(REQUEST_DIR, { recursive: true });
+fs.mkdirSync(PROOF_DIR,   { recursive: true });
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, AVATAR_DIR),
@@ -93,4 +97,61 @@ const handleAvatarUpload = (req, res, next) => {
   });
 };
 
-module.exports = { handleAvatarUpload };
+// ── Request photos (up to 3 files, field name: "photos") ──
+const requestPhotoStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, REQUEST_DIR),
+  filename:    (req, file, cb) => {
+    const ext = ALLOWED_EXT[file.mimetype] || '.bin';
+    cb(null, `${randomUUID()}${ext}`);
+  }
+});
+
+const uploadRequestPhotos = multer({
+  storage:    requestPhotoStorage,
+  fileFilter,
+  limits: { fileSize: MAX_BYTES, files: 3 }
+}).array('photos', 3);
+
+// Middleware — attaches to POST /api/requests
+// Parses multipart, saves files, puts public URLs on req.photoUrls
+const handleRequestPhotos = (req, res, next) => {
+  uploadRequestPhotos(req, res, (err) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE')  return res.status(413).json({ error: 'Each photo must be under 2 MB.' });
+      if (err.code === 'LIMIT_FILE_COUNT') return res.status(400).json({ error: 'Maximum 3 photos allowed.' });
+      return res.status(400).json({ error: err.message || 'Upload failed.' });
+    }
+    req.photoUrls = (req.files || []).map(f => `/uploads/requests/${f.filename}`);
+    next();
+  });
+};
+
+// ── Proof photo (single file, field name: "proof") ──
+const proofStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, PROOF_DIR),
+  filename:    (req, file, cb) => {
+    const ext = ALLOWED_EXT[file.mimetype] || '.bin';
+    cb(null, `${randomUUID()}${ext}`);
+  }
+});
+
+const uploadProof = multer({
+  storage:    proofStorage,
+  fileFilter,
+  limits: { fileSize: MAX_BYTES, files: 1 }
+}).single('proof');
+
+// Middleware — attaches to PATCH /api/tasks/:id/toggle
+// Parses multipart, saves file, puts public URL on req.proofUrl
+const handleProofUpload = (req, res, next) => {
+  uploadProof(req, res, (err) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'Proof photo must be under 2 MB.' });
+      return res.status(400).json({ error: err.message || 'Upload failed.' });
+    }
+    req.proofUrl = req.file ? `/uploads/proofs/${req.file.filename}` : null;
+    next();
+  });
+};
+
+module.exports = { handleAvatarUpload, handleRequestPhotos, handleProofUpload };

@@ -115,6 +115,7 @@ const schema = `
     user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     completed     BOOLEAN NOT NULL DEFAULT FALSE,
     completed_at  TIMESTAMPTZ,
+    proof_url     TEXT,
     UNIQUE (assignment_id, user_id)
   );
 
@@ -198,6 +199,31 @@ const schema = `
     contributed_at TIMESTAMPTZ DEFAULT NOW()
   );
 
+  -- ---------------------------------------------------------------------------
+  -- requests (maintenance issues & complaints)
+  -- ---------------------------------------------------------------------------
+  CREATE TABLE IF NOT EXISTS requests (
+    id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    household_id UUID NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+    created_by   UUID REFERENCES users(id) ON DELETE SET NULL,
+    type         VARCHAR(20) NOT NULL CHECK (type IN ('maintenance','complaint')),
+    category     VARCHAR(100) NOT NULL,
+    title        VARCHAR(200) NOT NULL,
+    description  TEXT,
+    status       VARCHAR(20) NOT NULL DEFAULT 'In Progress' CHECK (status IN ('In Progress','Completed')),
+    photo_urls   JSONB DEFAULT '[]',
+    created_at   TIMESTAMPTZ DEFAULT NOW(),
+    updated_at   TIMESTAMPTZ DEFAULT NOW()
+  );
+
+  CREATE TABLE IF NOT EXISTS request_comments (
+    id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    request_id UUID NOT NULL REFERENCES requests(id) ON DELETE CASCADE,
+    user_id    UUID REFERENCES users(id) ON DELETE SET NULL,
+    message    TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  );
+
   -- Indexes for hot paths
   CREATE INDEX IF NOT EXISTS idx_tasks_household         ON tasks(household_id);
   CREATE INDEX IF NOT EXISTS idx_members_household       ON household_members(household_id);
@@ -208,6 +234,8 @@ const schema = `
   CREATE INDEX IF NOT EXISTS idx_notifications_user      ON notifications(user_id);
   CREATE INDEX IF NOT EXISTS idx_purchases_household     ON purchases(household_id);
   CREATE INDEX IF NOT EXISTS idx_contributions_purchase  ON purchase_contributions(purchase_id);
+  CREATE INDEX IF NOT EXISTS idx_requests_household      ON requests(household_id);
+  CREATE INDEX IF NOT EXISTS idx_request_comments        ON request_comments(request_id);
 `;
 
 // =============================================================================
@@ -265,11 +293,40 @@ const upgrades = `
     user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     completed     BOOLEAN NOT NULL DEFAULT FALSE,
     completed_at  TIMESTAMPTZ,
+    proof_url     TEXT,
     UNIQUE (assignment_id, user_id)
   );
 
   -- Index for the hot path: looking up all members of an assignment.
   CREATE INDEX IF NOT EXISTS idx_assignment_members ON task_assignment_members(assignment_id);
+
+  -- Proof photo for task completion (safe to re-run on existing DBs)
+  ALTER TABLE task_assignment_members ADD COLUMN IF NOT EXISTS proof_url TEXT;
+
+  -- Requests tables (safe to re-run)
+  CREATE TABLE IF NOT EXISTS requests (
+    id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    household_id UUID NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+    created_by   UUID REFERENCES users(id) ON DELETE SET NULL,
+    type         VARCHAR(20) NOT NULL CHECK (type IN ('maintenance','complaint')),
+    category     VARCHAR(100) NOT NULL,
+    title        VARCHAR(200) NOT NULL,
+    description  TEXT,
+    status       VARCHAR(20) NOT NULL DEFAULT 'In Progress' CHECK (status IN ('In Progress','Completed')),
+    photo_urls   JSONB DEFAULT '[]',
+    created_at   TIMESTAMPTZ DEFAULT NOW(),
+    updated_at   TIMESTAMPTZ DEFAULT NOW()
+  );
+  CREATE TABLE IF NOT EXISTS request_comments (
+    id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    request_id UUID NOT NULL REFERENCES requests(id) ON DELETE CASCADE,
+    user_id    UUID REFERENCES users(id) ON DELETE SET NULL,
+    message    TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  );
+  ALTER TABLE requests DROP COLUMN IF EXISTS priority;
+  CREATE INDEX IF NOT EXISTS idx_requests_household ON requests(household_id);
+  CREATE INDEX IF NOT EXISTS idx_request_comments   ON request_comments(request_id);
 `;
 
 (async () => {
