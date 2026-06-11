@@ -5,6 +5,8 @@
 document.addEventListener('DOMContentLoaded', async () => {
   if (typeof lucide !== 'undefined') lucide.createIcons();
   if (localStorage.getItem('rota_theme') === 'dark') document.body.classList.add('dark-mode');
+  initNotifDot();
+  initNavDropdown();
 
   const hh = await requireMembership();
   if (!hh) return;
@@ -78,10 +80,46 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     tasks = await apiFetch('/households/' + householdId + '/tasks');
     renderChores();
+    checkDueReminders(tasks);
   } catch (err) {
     console.error('Tasks load failed:', err.message);
     tasks = JSON.parse(localStorage.getItem('rota_tasks_' + householdId)) || [];
     renderChores();
+  }
+
+  // Browser notification reminders for tasks due within 24 hours
+  async function checkDueReminders(allTasks) {
+    const myPending = allTasks.filter(t => t.am_assigned && t.my_status !== 'completed' && t.due_date);
+    if (myPending.length === 0) return;
+
+    const now = Date.now();
+    const soon = myPending.filter(t => {
+      const due = new Date(t.due_date).getTime();
+      return due - now <= 86400000; // within 24h (including overdue)
+    });
+    if (soon.length === 0) return;
+
+    // Ask permission once, then fire
+    if (Notification.permission === 'default') {
+      await Notification.requestPermission();
+    }
+    if (Notification.permission !== 'granted') return;
+
+    // Don't spam — only remind once per session per task
+    const reminded = JSON.parse(sessionStorage.getItem('rota_reminded') || '[]');
+    for (const t of soon) {
+      if (reminded.includes(t.id)) continue;
+      const due   = new Date(t.due_date);
+      const days  = Math.ceil((due.setHours(0,0,0,0) - new Date().setHours(0,0,0,0)) / 86400000);
+      const label = days < 0 ? 'overdue' : days === 0 ? 'due today' : 'due tomorrow';
+      new Notification('Rota Reminder', {
+        body: `"${t.title}" is ${label}`,
+        icon: '/favicon.ico',
+        tag:  'rota-task-' + t.id,
+      });
+      reminded.push(t.id);
+    }
+    sessionStorage.setItem('rota_reminded', JSON.stringify(reminded));
   }
 
   function renderChores() {
@@ -109,13 +147,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     list.innerHTML = filtered.map(t => {
       const assignees  = Array.isArray(t.assignees) ? t.assignees : [];
       const myStatus   = t.my_status || 'pending';
-      const amAssigned = t.am_assigned === true;
-      // Admins aren't assigned so use overall task status for the done visual
       const myDone     = myRole === 'admin'
         ? (t.status || 'pending') === 'completed'
         : myStatus === 'completed';
-      const hasProof   = !!pendingProofs[t.id];
-
 
       // Avatar row — green = completed, purple = pending
       const avatarRow = assignees.length > 0
@@ -130,65 +164,30 @@ document.addEventListener('DOMContentLoaded', async () => {
             </span>`).join('')
         : '<span style="color:#94a3b8;font-size:.8rem;">Unassigned</span>';
 
-      const completionLabel = myDone
+      const statusLabel = myDone
         ? `<span style="font-size:.75rem;color:#43d9a2;margin-left:4px;">✓ Done</span>`
         : '';
 
-      // Proof photo preview label (after capture, before submit)
-      const proofPreview = hasProof
-        ? `<span style="font-size:.72rem;color:#6c63ff;margin-left:4px;display:flex;align-items:center;gap:3px;">
-             <i data-lucide="image" style="width:11px;height:11px;"></i> Photo ready
-           </span>`
-        : '';
-
-      // Checkbox — enabled only after photo captured (or if already done)
-      const checkClass   = myDone ? 'chore-check checked' : 'chore-check';
-      const checkContent = myDone ? '<i data-lucide="check" style="width:14px"></i>' : '';
-      let checkAttr = '';
-      if (myDone) {
-        checkAttr = 'style="cursor:default;"';
-      } else if (amAssigned && hasProof) {
-        checkAttr = `onclick="submitTaskCompletion('${t.id}')" style="cursor:pointer;" title="Click to mark complete"`;
-      } else if (amAssigned && !hasProof) {
-        checkAttr = `style="opacity:.35;cursor:not-allowed;" title="Take a photo first"`;
-      } else {
-        checkAttr = `style="opacity:.25;cursor:not-allowed;" title="You are not assigned to this task"`;
+      // Due-date badge
+      let dueBadge = '';
+      if (!myDone && t.due_date) {
+        const due  = new Date(t.due_date);
+        const now  = new Date();
+        const days = Math.ceil((due.setHours(0,0,0,0) - now.setHours(0,0,0,0)) / 86400000);
+        if (days < 0) {
+          dueBadge = `<span style="font-size:.7rem;background:#fee2e2;color:#dc2626;border-radius:6px;padding:1px 6px;font-weight:700;margin-left:4px;">Overdue</span>`;
+        } else if (days === 0) {
+          dueBadge = `<span style="font-size:.7rem;background:#ffedd5;color:#ea580c;border-radius:6px;padding:1px 6px;font-weight:700;margin-left:4px;">Due today</span>`;
+        } else if (days === 1) {
+          dueBadge = `<span style="font-size:.7rem;background:#fef9c3;color:#ca8a04;border-radius:6px;padding:1px 6px;font-weight:700;margin-left:4px;">Due tomorrow</span>`;
+        } else if (days <= 3) {
+          dueBadge = `<span style="font-size:.7rem;background:#f1f5f9;color:#64748b;border-radius:6px;padding:1px 6px;font-weight:600;margin-left:4px;">Due in ${days}d</span>`;
+        }
       }
 
-      // Camera icon — only for assigned users on pending tasks
-      const cameraBtn = amAssigned && !myDone
-        ? `<input type="file" accept="image/*" capture="environment"
-                  id="proof-input-${t.id}" style="display:none;"
-                  onchange="handleProofCapture('${t.id}', this)">
-           <button onclick="document.getElementById('proof-input-${t.id}').click()"
-                   id="camera-btn-${t.id}"
-                   title="${hasProof ? 'Retake photo' : 'Take proof photo'}"
-                   style="background:none;border:none;cursor:pointer;padding:4px;
-                          color:${hasProof ? '#43d9a2' : '#6c63ff'};flex-shrink:0;line-height:0;transition:color .15s;">
-             <i data-lucide="${hasProof ? 'image-check' : 'camera'}" style="width:16px;height:16px;"></i>
-           </button>`
-        : '';
-
-      // Admin: photo icon — collect all assignees who uploaded proof
-      const proofsForTask = assignees.filter(a => a.proof_url);
-      if (proofsForTask.length > 0) {
-        window._proofData = window._proofData || {};
-        window._proofData[t.id] = { title: t.title, proofs: proofsForTask };
-      }
-      const proofViewBtn = myRole === 'admin' && proofsForTask.length > 0
-        ? `<button onclick="openProofModal('${t.id}')"
-                   title="View proof photos (${proofsForTask.length})"
-                   style="background:none;border:none;cursor:pointer;padding:4px;
-                          color:#6c63ff;flex-shrink:0;line-height:0;transition:color .15s;"
-                   onmouseover="this.style.color='#4f46e5'"
-                   onmouseout="this.style.color='#6c63ff'">
-             <i data-lucide="images" style="width:16px;height:16px;"></i>
-           </button>`
-        : '';
-
-      // Delete button — admins only
+      // Delete button — admins only (stop propagation so card click doesn't open modal)
       const deleteBtn = myRole === 'admin'
-        ? `<button onclick="deleteChore('${t.id}')" title="Delete task"
+        ? `<button onclick="event.stopPropagation();deleteChore('${t.id}')" title="Delete task"
                    style="background:none;border:none;cursor:pointer;padding:4px;
                           color:#94a3b8;flex-shrink:0;line-height:0;transition:color .15s;"
                    onmouseover="this.style.color='#f87171'"
@@ -198,83 +197,166 @@ document.addEventListener('DOMContentLoaded', async () => {
         : '';
 
       return `
-        <div class="chore-item ${myDone ? 'done' : ''}" data-id="${t.id}">
-          <div class="${checkClass}" ${checkAttr}>
-            ${checkContent}
+        <div class="chore-item ${myDone ? 'done' : ''}" data-id="${t.id}"
+             onclick="openTaskDetail('${t.id}')" style="cursor:pointer;">
+          <div class="chore-check ${myDone ? 'checked' : ''}" style="cursor:default;pointer-events:none;">
+            ${myDone ? '<i data-lucide="check" style="width:14px"></i>' : ''}
           </div>
           <div class="chore-info" style="flex:1;min-width:0;">
             <span class="chore-title">${escapeHtml(t.title)}</span>
             <div class="chore-meta" style="display:flex;align-items:center;gap:3px;margin-top:4px;flex-wrap:wrap;">
               ${avatarRow}
-              ${completionLabel}
-              ${proofPreview}
+              ${statusLabel}
+              ${dueBadge}
+              ${t.description ? `<span style="font-size:.72rem;color:#6c63ff;margin-left:4px;display:flex;align-items:center;gap:2px;"><i data-lucide="file-text" style="width:11px;height:11px;"></i></span>` : ''}
             </div>
           </div>
-          ${cameraBtn}
-          ${proofViewBtn}
           ${deleteBtn}
         </div>`;
     }).join('');
     if (typeof lucide !== 'undefined') lucide.createIcons();
   }
 
-  // ── Proof photo modal (admin only) ───────────────────────────────────────
-  // Inject modal HTML once
-  if (!document.getElementById('proofModal')) {
+  // ── Task Detail Modal ────────────────────────────────────────────────────
+  if (!document.getElementById('taskDetailModal')) {
     const el = document.createElement('div');
-    el.id = 'proofModal';
-    el.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;align-items:center;justify-content:center;padding:16px;';
+    el.id = 'taskDetailModal';
+    el.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center;padding:16px;';
     el.innerHTML = `
-      <div style="background:var(--bg-card,#1e1e2e);border-radius:16px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.4);">
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid rgba(255,255,255,.08);position:sticky;top:0;background:var(--bg-card,#1e1e2e);z-index:1;">
-          <span id="proofModalTitle" style="font-size:15px;font-weight:600;color:var(--text-primary,#e2e8f0);"></span>
-          <button onclick="closeProofModal()" style="background:none;border:none;cursor:pointer;color:#94a3b8;font-size:20px;line-height:1;">✕</button>
+      <div style="background:var(--white,#fff);border-radius:20px;width:100%;max-width:500px;
+                  max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.2);">
+        <div style="display:flex;align-items:center;justify-content:space-between;
+                    padding:18px 20px 14px;border-bottom:1px solid var(--border,#e2e8f0);
+                    position:sticky;top:0;background:var(--white,#fff);z-index:1;">
+          <h3 id="tdTitle" style="margin:0;font-size:1.05rem;font-weight:700;"></h3>
+          <button onclick="closeTaskDetail()" style="background:none;border:none;cursor:pointer;
+            color:#94a3b8;font-size:22px;line-height:1;padding:2px 6px;">✕</button>
         </div>
-        <div id="proofModalBody" style="padding:14px 18px;display:flex;flex-direction:column;gap:16px;"></div>
+        <div id="tdBody" style="padding:18px 20px;display:flex;flex-direction:column;gap:16px;"></div>
       </div>`;
     document.body.appendChild(el);
-    el.addEventListener('click', e => { if (e.target === el) closeProofModal(); });
+    el.addEventListener('click', e => { if (e.target === el) closeTaskDetail(); });
   }
 
-  window.openProofModal = (taskId) => {
-    const data = (window._proofData || {})[taskId];
-    if (!data) return;
-    document.getElementById('proofModalTitle').textContent = data.title;
-    document.getElementById('proofModalBody').innerHTML = data.proofs.map(p => {
-      const completedDate = p.completed_at ? new Date(p.completed_at) : null;
-      const completedStr  = completedDate
-        ? completedDate.toLocaleDateString(undefined, { month:'short', day:'numeric' }) + ' ' +
-          completedDate.toLocaleTimeString(undefined, { hour:'2-digit', minute:'2-digit' })
-        : '—';
-      return `
-        <div style="border:1px solid rgba(255,255,255,.1);border-radius:14px;overflow:hidden;">
-          <div style="width:100%;height:200px;background:rgba(255,255,255,.06);
-                      display:flex;flex-direction:column;align-items:center;justify-content:center;
-                      color:#94a3b8;overflow:hidden;">
-            <img src="${escapeAttr(p.proof_url)}" alt="Proof"
-                 style="width:100%;height:100%;object-fit:cover;display:block;"
-                 onerror="this.style.display='none';this.parentElement.innerHTML='<i data-lucide=&quot;camera&quot; style=&quot;width:32px;height:32px;&quot;></i><span style=&quot;font-size:13px;margin-top:8px;&quot;>Proof photo</span>'">
-          </div>
-          <div style="padding:14px 16px;display:flex;flex-direction:column;gap:10px;">
-            <div style="display:flex;justify-content:space-between;font-size:13px;">
-              <span style="color:#94a3b8;">Assigned to</span>
-              <span style="color:var(--text-primary,#e2e8f0);font-weight:600;">${escapeHtml(p.name)}</span>
-            </div>
-            <div style="display:flex;justify-content:space-between;font-size:13px;">
-              <span style="color:#94a3b8;">Completed</span>
-              <span style="color:var(--text-primary,#e2e8f0);font-weight:600;">${completedStr}</span>
-            </div>
-            <div style="display:flex;justify-content:space-between;font-size:13px;">
-              <span style="color:#94a3b8;">Status</span>
-              <span style="color:#43d9a2;font-weight:600;">Done</span>
-            </div>
-          </div>
-        </div>`;
-    }).join('');
-    document.getElementById('proofModal').style.display = 'flex';
+  window.openTaskDetail = (taskId) => {
+    const t = tasks.find(x => String(x.id) === String(taskId));
+    if (!t) return;
+
+    const assignees  = Array.isArray(t.assignees) ? t.assignees : [];
+    const amAssigned = t.am_assigned === true;
+    const myDone     = myRole === 'admin'
+      ? (t.status || 'pending') === 'completed'
+      : (t.my_status || 'pending') === 'completed';
+
+    const pendingBefore = pendingProofs[taskId]?.before;
+    const pendingAfter  = pendingProofs[taskId]?.after;
+
+    // Assignee pills
+    const assigneePills = assignees.map(a => `
+      <span style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;
+        border-radius:20px;background:${a.completed ? 'rgba(67,217,162,.12)' : 'rgba(108,99,255,.1)'};
+        font-size:.8rem;font-weight:600;color:${a.completed ? '#16a34a' : '#6c63ff'};">
+        ${escapeHtml(a.name)} ${a.completed ? '✓' : ''}
+      </span>`).join('');
+
+    // Admin proof photos section — proof_url is JSON {before, after}
+    const proofsForTask = assignees.filter(a => a.proof_url);
+    const adminProofs = myRole === 'admin' && proofsForTask.length > 0
+      ? `<div>
+           <p style="font-size:.78rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;margin:0 0 10px;">Proof Photos</p>
+           ${proofsForTask.map(p => {
+             let urls = { before: null, after: null };
+             try { urls = JSON.parse(p.proof_url); } catch { urls.after = p.proof_url; }
+             const date = p.completed_at ? new Date(p.completed_at).toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+             return `
+               <div style="border:1px solid var(--border,#e2e8f0);border-radius:12px;padding:12px 14px;margin-bottom:10px;">
+                 <div style="font-size:.82rem;font-weight:600;color:#475569;margin-bottom:8px;">
+                   ${escapeHtml(p.name)} ${date ? '· ' + date : ''}
+                 </div>
+                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                   ${urls.before ? `<div><p style="font-size:.72rem;color:#94a3b8;margin:0 0 4px;">Before</p>
+                     <img src="${escapeAttr(urls.before)}" style="width:100%;height:100px;object-fit:cover;border-radius:8px;"></div>` : ''}
+                   ${urls.after  ? `<div><p style="font-size:.72rem;color:#94a3b8;margin:0 0 4px;">After</p>
+                     <img src="${escapeAttr(urls.after)}" style="width:100%;height:100px;object-fit:cover;border-radius:8px;"></div>` : ''}
+                 </div>
+               </div>`;
+           }).join('')}
+         </div>`
+      : '';
+
+    // Photo upload section — only for assigned users on pending tasks
+    const photoUpload = amAssigned && !myDone
+      ? `<div>
+           <p style="font-size:.78rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;margin:0 0 10px;">Proof Photos</p>
+           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+             <!-- Before photo -->
+             <div>
+               <p style="font-size:.8rem;font-weight:600;margin:0 0 6px;color:#64748b;">Before</p>
+               <input type="file" accept="image/*" capture="environment" id="before-input-${taskId}" style="display:none;"
+                      onchange="handleDetailProof('${taskId}','before',this)">
+               <div onclick="document.getElementById('before-input-${taskId}').click()"
+                    style="height:120px;border:2px dashed ${pendingBefore ? '#43d9a2' : 'var(--border,#e2e8f0)'};
+                           border-radius:12px;display:flex;flex-direction:column;align-items:center;
+                           justify-content:center;cursor:pointer;gap:6px;overflow:hidden;
+                           background:${pendingBefore ? 'rgba(67,217,162,.06)' : 'var(--bg,#f8fafc)'};">
+                 ${pendingBefore
+                   ? `<img src="${URL.createObjectURL(pendingBefore)}" style="width:100%;height:100%;object-fit:cover;">`
+                   : `<i data-lucide="camera" style="width:22px;height:22px;color:#94a3b8;"></i>
+                      <span style="font-size:.75rem;color:#94a3b8;">Tap to add</span>`}
+               </div>
+             </div>
+             <!-- After photo -->
+             <div>
+               <p style="font-size:.8rem;font-weight:600;margin:0 0 6px;color:#64748b;">After</p>
+               <input type="file" accept="image/*" capture="environment" id="after-input-${taskId}" style="display:none;"
+                      onchange="handleDetailProof('${taskId}','after',this)">
+               <div onclick="document.getElementById('after-input-${taskId}').click()"
+                    style="height:120px;border:2px dashed ${pendingAfter ? '#43d9a2' : 'var(--border,#e2e8f0)'};
+                           border-radius:12px;display:flex;flex-direction:column;align-items:center;
+                           justify-content:center;cursor:pointer;gap:6px;overflow:hidden;
+                           background:${pendingAfter ? 'rgba(67,217,162,.06)' : 'var(--bg,#f8fafc)'};">
+                 ${pendingAfter
+                   ? `<img src="${URL.createObjectURL(pendingAfter)}" style="width:100%;height:100%;object-fit:cover;">`
+                   : `<i data-lucide="camera" style="width:22px;height:22px;color:#94a3b8;"></i>
+                      <span style="font-size:.75rem;color:#94a3b8;">Tap to add</span>`}
+               </div>
+             </div>
+           </div>
+           <button id="td-submit-${taskId}" onclick="submitDetailCompletion('${taskId}')"
+                   ${pendingBefore && pendingAfter ? '' : 'disabled'}
+                   style="width:100%;margin-top:14px;padding:12px;border:none;border-radius:12px;
+                          font-size:.95rem;font-weight:700;cursor:${pendingBefore && pendingAfter ? 'pointer' : 'not-allowed'};
+                          background:${pendingBefore && pendingAfter ? '#6c63ff' : '#e2e8f0'};
+                          color:${pendingBefore && pendingAfter ? '#fff' : '#94a3b8'};
+                          font-family:inherit;transition:all .2s;">
+             ${pendingBefore && pendingAfter ? 'Mark as Complete' : 'Add both photos to complete'}
+           </button>
+         </div>`
+      : '';
+
+    document.getElementById('tdTitle').textContent = t.title;
+    document.getElementById('tdBody').innerHTML = `
+      ${t.description ? `
+        <div>
+          <p style="font-size:.78rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;margin:0 0 8px;">Description</p>
+          <p style="font-size:.9rem;color:#475569;line-height:1.6;margin:0;padding:12px 14px;
+             background:rgba(108,99,255,.05);border-radius:10px;border-left:3px solid #6c63ff;">
+            ${escapeHtml(t.description)}
+          </p>
+        </div>` : ''}
+      <div>
+        <p style="font-size:.78rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;margin:0 0 8px;">Assigned To</p>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;">${assigneePills || '<span style="color:#94a3b8;font-size:.85rem;">Unassigned</span>'}</div>
+      </div>
+      ${adminProofs}
+      ${photoUpload}
+    `;
+    document.getElementById('taskDetailModal').style.display = 'flex';
+    if (typeof lucide !== 'undefined') lucide.createIcons();
   };
-  window.closeProofModal = () => {
-    document.getElementById('proofModal').style.display = 'none';
+
+  window.closeTaskDetail = () => {
+    document.getElementById('taskDetailModal').style.display = 'none';
   };
 
   window.deleteChore = async (id) => {
@@ -296,39 +378,42 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderChores();
   };
 
-  // Called when user captures a photo — stores it locally, enables the checkbox
   const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
-  window.handleProofCapture = async (id, input) => {
+  // Called from task detail modal when user picks before/after photo
+  window.handleDetailProof = async (taskId, slot, input) => {
     const file = input.files && input.files[0];
     input.value = '';
     if (!file) return;
-
-    // Option 1: validate type client-side before doing anything
     if (!ALLOWED_TYPES.includes(file.type)) {
       toast('Only JPEG, PNG or WebP photos allowed', 'error');
       return;
     }
-
     const compressed = await compressImage(file);
-    pendingProofs[id] = compressed;
-    renderChores();
+    if (!pendingProofs[taskId]) pendingProofs[taskId] = {};
+    pendingProofs[taskId][slot] = compressed;
+    // Re-open modal to refresh the preview
+    openTaskDetail(taskId);
   };
 
-  // Called when the (now-enabled) checkbox is clicked after photo is captured
-  window.submitTaskCompletion = async (id) => {
-    const file = pendingProofs[id];
-    if (!file) { toast('Take a photo first', 'error'); return; }
+  // Called when user clicks "Mark as Complete" in the task detail modal
+  window.submitDetailCompletion = async (taskId) => {
+    const proofs = pendingProofs[taskId] || {};
+    if (!proofs.before || !proofs.after) {
+      toast('Please add both before and after photos', 'error');
+      return;
+    }
 
-    const btn = document.getElementById(`camera-btn-${id}`);
-    if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; }
+    const btn = document.getElementById(`td-submit-${taskId}`);
+    if (btn) { btn.disabled = true; btn.textContent = 'Submitting…'; }
 
     try {
       const form = new FormData();
-      form.append('proof', file);
+      form.append('proof_before', proofs.before, 'before.jpg');
+      form.append('proof_after',  proofs.after,  'after.jpg');
 
       const tkn = getToken();
-      const res = await fetch(`/api/tasks/${id}/toggle`, {
+      const res = await fetch(`/api/tasks/${taskId}/toggle`, {
         method: 'PATCH',
         headers: { Authorization: 'Bearer ' + tkn },
         body: form
@@ -340,20 +425,19 @@ document.addEventListener('DOMContentLoaded', async () => {
       const result = await res.json();
       const { myCompleted, assignees: updatedAssignees } = result;
 
-      delete pendingProofs[id];
+      delete pendingProofs[taskId];
 
-      const localTask = tasks.find(t => String(t.id) === String(id));
+      const localTask = tasks.find(t => String(t.id) === String(taskId));
       if (localTask) {
         localTask.my_status = myCompleted ? 'completed' : 'pending';
         if (Array.isArray(updatedAssignees)) localTask.assignees = updatedAssignees;
       }
+      closeTaskDetail();
       renderChores();
-      toast('Task marked complete', 'success');
+      toast('Task marked complete!', 'success');
     } catch (err) {
       toast(err.message || 'Could not update task', 'error');
-    } finally {
-      // Option 2: always re-enable the button regardless of outcome
-      if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+      if (btn) { btn.disabled = false; btn.textContent = 'Mark as Complete'; }
     }
   };
 
@@ -385,7 +469,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   window.confirmAddChore = async () => {
     const titleEl = document.getElementById('newChoreTitle');
+    const descEl  = document.getElementById('newChoreDesc');
     const title   = titleEl.value.trim();
+    const description = descEl ? descEl.value.trim() : '';
     if (!title) { toast('Enter a task title', 'error'); return; }
 
     // Collect all ticked checkboxes as an array of UUIDs
@@ -395,9 +481,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
       await apiFetch('/households/' + householdId + '/tasks', {
         method: 'POST',
-        body: JSON.stringify({ title, assigned_to: assignees.length > 0 ? assignees : null })
+        body: JSON.stringify({ title, description: description || null, assigned_to: assignees.length > 0 ? assignees : null })
       });
       titleEl.value = '';
+      if (descEl) descEl.value = '';
       closeModal();
       tasks = await apiFetch('/households/' + householdId + '/tasks');
       localStorage.setItem('rota_tasks_' + householdId, JSON.stringify(tasks));
@@ -629,52 +716,94 @@ document.addEventListener('DOMContentLoaded', async () => {
   loadPurchases();
 
   // =========================================================================
-  // SHOPPING LIST (local only, unchanged)
   // =========================================================================
-  let shopping       = JSON.parse(localStorage.getItem('rota_shopping')) || [];
+  // SHOPPING LIST — database-backed
+  // =========================================================================
+  let shopping       = [];
   let currentShopTab = 'tobuy';
 
   const renderShopping = () => {
     const list = document.getElementById('shoppingList');
     if (!list) return;
     const filtered = shopping.filter(i => i.status === currentShopTab);
+    if (filtered.length === 0) {
+      list.innerHTML = `<p style="color:#94a3b8;font-size:.85rem;text-align:center;padding:16px 0;">Nothing here yet.</p>`;
+      return;
+    }
     list.innerHTML = filtered.map(item => `
       <div class="shop-item ${item.status === 'purchased' ? 'purchased' : ''}">
         <div class="shop-item-left">
-          <div class="shop-check ${item.status === 'purchased' ? 'checked' : ''}" onclick="toggleShopItem(${item.id})">
+          <div class="shop-check ${item.status === 'purchased' ? 'checked' : ''}"
+               onclick="toggleShopItem('${item.id}')">
             ${item.status === 'purchased' ? '<i data-lucide="check" style="width:14px"></i>' : ''}
           </div>
-          <label>${escapeHtml(item.name)}</label>
+          <div>
+            <label>${escapeHtml(item.name)}</label>
+            ${item.status === 'purchased' && item.purchased_by_name
+              ? `<div style="font-size:.72rem;color:#94a3b8;">by ${escapeHtml(item.purchased_by_name)}</div>`
+              : item.added_by_name
+              ? `<div style="font-size:.72rem;color:#94a3b8;">added by ${escapeHtml(item.added_by_name)}</div>`
+              : ''}
+          </div>
         </div>
-        <button class="delete-btn" onclick="deleteShopItem(${item.id})">
+        <button class="delete-btn" onclick="deleteShopItem('${item.id}')">
           <i data-lucide="trash-2" style="width:16px;height:16px;"></i>
         </button>
       </div>`).join('');
     if (typeof lucide !== 'undefined') lucide.createIcons();
-    localStorage.setItem('rota_shopping', JSON.stringify(shopping));
   };
+
+  const loadShopping = async () => {
+    try {
+      const data = await apiFetch('/households/' + householdId + '/shopping');
+      shopping = data.items || [];
+      renderShopping();
+    } catch (err) {
+      console.error('Shopping load failed:', err.message);
+    }
+  };
+
   window.switchShopTab = (tab) => {
     currentShopTab = tab;
     document.querySelectorAll('.s-tab').forEach(b => b.classList.remove('active'));
     if (event && event.target) event.target.classList.add('active');
     renderShopping();
   };
-  window.toggleShopItem = (id) => {
-    const item = shopping.find(i => i.id === id);
-    if (item) { item.status = item.status === 'tobuy' ? 'purchased' : 'tobuy'; renderShopping(); }
+
+  window.toggleShopItem = async (id) => {
+    try {
+      // WS SHOPPING_TOGGLED will update the local state for everyone
+      await apiFetch(`/households/${householdId}/shopping/${id}/toggle`, { method: 'PATCH' });
+    } catch (err) { toast(err.message || 'Could not update item', 'error'); }
   };
-  window.deleteShopItem = (id) => {
-    shopping = shopping.filter(i => i.id !== id);
-    renderShopping();
+
+  window.deleteShopItem = async (id) => {
+    try {
+      await apiFetch(`/households/${householdId}/shopping/${id}`, { method: 'DELETE' });
+      shopping = shopping.filter(i => i.id !== id);
+      renderShopping();
+    } catch (err) { toast(err.message || 'Could not delete item', 'error'); }
   };
-  window.addShoppingItem = () => {
+
+  window.addShoppingItem = async () => {
     const input = document.getElementById('shopInput');
     if (!input || !input.value.trim()) return;
-    shopping.push({ id: Date.now(), name: input.value.trim(), status: 'tobuy' });
+    const name = input.value.trim();
     input.value = '';
-    renderShopping();
+    try {
+      // Don't add locally — the SHOPPING_ADDED WebSocket broadcast handles
+      // the update for everyone including the sender, avoiding duplicates.
+      await apiFetch('/households/' + householdId + '/shopping', {
+        method: 'POST',
+        body: JSON.stringify({ name }),
+      });
+    } catch (err) {
+      input.value = name; // restore on failure
+      toast(err.message || 'Could not add item', 'error');
+    }
   };
-  renderShopping();
+
+  await loadShopping();
 
   // =========================================================================
   // WEBSOCKET — real-time updates from other housemates
@@ -741,6 +870,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         case 'PURCHASE_DELETED':
           try { await loadPurchases(); } catch (_) {}
           break;
+
+        case 'SHOPPING_ADDED': {
+          shopping.unshift(msg.item);
+          renderShopping();
+          break;
+        }
+        case 'SHOPPING_TOGGLED': {
+          const idx = shopping.findIndex(i => i.id === msg.item.id);
+          if (idx !== -1) { shopping[idx] = { ...shopping[idx], ...msg.item }; renderShopping(); }
+          break;
+        }
+        case 'SHOPPING_DELETED': {
+          shopping = shopping.filter(i => i.id !== msg.itemId);
+          renderShopping();
+          break;
+        }
       }
     });
 

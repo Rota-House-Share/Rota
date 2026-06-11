@@ -6,6 +6,8 @@
 document.addEventListener('DOMContentLoaded', async () => {
     if (typeof lucide !== 'undefined') lucide.createIcons();
     if (localStorage.getItem('rota_theme') === 'dark') document.body.classList.add('dark-mode');
+    initNotifDot();
+    initNavDropdown();
 
     if (!(await requireAuth())) return;
 

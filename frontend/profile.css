@@ -3,20 +3,11 @@
    ========================================================================= */
 
 :root {
-    --primary:       #6366f1;
-    --primary-light: #e0e7ff;
-    --bg-body:       #f8fafc;
-    --white:         #ffffff;
-    --text-main:     #0f172a;
-    --text-sub:      #64748b;
-    --border:        #e2e8f0;
-
-    /* FIX (Bug #3): Added two new tokens so every surface has a named
-       colour instead of scattered literals:
-         --surface-inset  -> inset panels like .house-box, .badge-circle
-         --icon           -> stroke colour for all lucide icons       */
-    --surface-inset: #f1f5f9;
-    --icon:          #475569;
+    /* Profile-specific tokens — base tokens come from groupDashboard.css */
+    --primary-light: #e0e7ff;  /* lighter tint used for avatar background */
+    --bg-body:       #f8fafc;  /* alias of --bg, used in body background-color */
+    --surface-inset: #f1f5f9;  /* inset panels: .house-box, .badge-circle */
+    --icon:          #475569;  /* stroke colour for lucide icons */
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -29,27 +20,7 @@ body {
 
 .app-wrapper { display: flex; min-height: 100vh; }
 
-/* Sidebar */
-.sidebar {
-    width: 80px;
-    background: var(--white);
-    border-right: 1px solid var(--border);
-    display: flex; flex-direction: column; align-items: center;
-    padding: 30px 0;
-    position: fixed; height: 100vh;
-}
-.brand .logo-sq {
-    background: var(--primary);
-    color: white;
-    padding: 10px 14px;
-    border-radius: 12px;
-    font-weight: 800;
-    margin-bottom: 50px;
-}
-.nav-links { display: flex; flex-direction: column; gap: 25px; flex: 1; }
-.nav-item  { color: var(--icon); transition: all 0.2s; }
-.nav-item.active, .nav-item:hover { color: var(--primary); }
-.logout-btn { border: none; background: none; color: #ef4444; cursor: pointer; }
+/* Sidebar — all styles come from groupDashboard.css, no overrides here */
 
 /* Content */
 .content {

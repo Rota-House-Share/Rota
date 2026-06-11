@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rota | Notifications</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="groupDashboard.css">
+  <link rel="stylesheet" href="toast.css">
+  <style>
+    .notif-content {
+      margin-left: 80px;
+      padding: 36px 40px;
+      min-height: 100vh;
+      background: var(--bg);
+      max-width: 720px;
+    }
+    .page-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+    .page-header h1 { font-size: 1.6rem; font-weight: 800; }
+    .page-header p  { color: var(--text-sub); font-size: .9rem; margin-top: 2px; }
+
+    .header-actions { display: flex; gap: 8px; flex-shrink: 0; }
+    .mark-all-btn, .clear-all-btn {
+      background: none;
+      border: 1.5px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 14px;
+      font-size: .82rem;
+      font-weight: 700;
+      cursor: pointer;
+      color: var(--text-sub);
+      font-family: inherit;
+      transition: all .15s;
+    }
+    .mark-all-btn:hover  { border-color: var(--primary); color: var(--primary); }
+    .clear-all-btn:hover { border-color: #ef4444; color: #ef4444; }
+
+    /* Tabs */
+    .notif-tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .notif-tabs::-webkit-scrollbar { display: none; }
+    .notif-tab {
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      padding: 8px 14px 10px;
+      font-family: inherit;
+      font-size: .85rem;
+      font-weight: 600;
+      color: var(--text-sub);
+      cursor: pointer;
+      margin-bottom: -1px;
+      white-space: nowrap;
+      transition: color .15s, border-color .15s;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .notif-tab:hover { color: var(--primary); }
+    .notif-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+    .tab-badge {
+      background: var(--primary);
+      color: white;
+      font-size: .65rem;
+      font-weight: 700;
+      border-radius: 999px;
+      padding: 1px 6px;
+      min-width: 18px;
+      text-align: center;
+    }
+    .tab-badge.zero { display: none; }
+
+    /* Notification items */
+    .notif-list { display: flex; flex-direction: column; gap: 10px; }
+    .notif-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 14px 16px;
+      transition: box-shadow .15s;
+      position: relative;
+    }
+    .notif-item:hover { box-shadow: 0 4px 16px rgba(99,102,241,.08); }
+    .notif-item.unread { border-left: 3px solid var(--primary); background: rgba(108,99,255,.03); }
+
+    .notif-icon {
+      width: 38px; height: 38px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .notif-icon.task     { background: rgba(108,99,255,.12); color: #6c63ff; }
+    .notif-icon.request  { background: rgba(251,191,36,.12);  color: #d97706; }
+    .notif-icon.purchase { background: rgba(67,217,162,.12);  color: #16a34a; }
+    .notif-icon.shopping { background: rgba(59,130,246,.12);  color: #2563eb; }
+    .notif-icon.default  { background: rgba(148,163,184,.12); color: #64748b; }
+
+    .notif-body { flex: 1; min-width: 0; }
+    .notif-msg  { font-size: .9rem; font-weight: 500; line-height: 1.4; margin-bottom: 4px; }
+    .notif-time { font-size: .75rem; color: var(--text-sub); }
+
+    .notif-item { cursor: pointer; }
+
+    .notif-actions {
+      display: flex;
+      align-items: center;
+      flex-shrink: 0;
+      opacity: 0;
+      transition: opacity .15s;
+    }
+    .notif-item:hover .notif-actions { opacity: 1; }
+
+    .notif-delete {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--text-sub);
+      padding: 3px;
+      border-radius: 6px;
+      display: flex; align-items: center;
+      transition: color .15s;
+    }
+    .notif-delete:hover { color: #ef4444; }
+
+    .empty-state {
+      text-align: center;
+      padding: 80px 20px;
+      color: var(--text-sub);
+    }
+    .empty-state .empty-icon { font-size: 3rem; margin-bottom: 12px; }
+    .empty-state p { font-size: .95rem; }
+  </style>
+</head>
+<body>
+
+<nav class="sidebar">
+  <div class="logo-sq">R</div>
+  <div class="nav-links">
+    <div class="nav-group">
+      <a href="Groupdashboard.html" id="navDashToggle" class="nav-item" title="Dashboard" onclick="dashNavClick(event)">
+        <i data-lucide="layout-dashboard"></i>
+      </a>
+      <div class="nav-sub" id="dashSubMenu">
+        <a href="requests.html"      class="nav-item nav-sub-item" title="Requests"><i data-lucide="file-plus"></i></a>
+        <a href="notifications.html" class="nav-item nav-sub-item active" title="Notifications"><i data-lucide="bell"></i></a>
+      </div>
+    </div>
+    <a href="leaderboard.html" class="nav-item" title="Leaderboard"><i data-lucide="trophy"></i></a>
+    <a href="profile.html"     class="nav-item" title="Account"><i data-lucide="user"></i></a>
+  </div>
+  <button onclick="clearSession()" class="logout-btn" title="Logout"><i data-lucide="log-out"></i></button>
+</nav>
+
+<div class="notif-content">
+  <div class="page-header">
+    <div>
+      <h1>Notifications</h1>
+      <p id="unreadCount">Loading…</p>
+    </div>
+    <div class="header-actions">
+      <button class="mark-all-btn" onclick="markAllRead()">Mark all read</button>
+      <button class="clear-all-btn" onclick="clearAll()">Clear all</button>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="notif-tabs">
+    <button class="notif-tab active" data-tab="all"       onclick="switchTab('all')">
+      All <span class="tab-badge zero" id="badge-all">0</span>
+    </button>
+    <button class="notif-tab" data-tab="tasks"     onclick="switchTab('tasks')">
+      Tasks <span class="tab-badge zero" id="badge-tasks">0</span>
+    </button>
+    <button class="notif-tab" data-tab="requests"  onclick="switchTab('requests')">
+      Requests <span class="tab-badge zero" id="badge-requests">0</span>
+    </button>
+    <button class="notif-tab" data-tab="purchases" onclick="switchTab('purchases')">
+      Shared Purchases <span class="tab-badge zero" id="badge-purchases">0</span>
+    </button>
+    <button class="notif-tab" data-tab="shopping"  onclick="switchTab('shopping')">
+      Shopping List <span class="tab-badge zero" id="badge-shopping">0</span>
+    </button>
+  </div>
+
+  <div class="notif-list" id="notifList"></div>
+</div>
+
+<script src="api.js"></script>
+<script src="toast.js"></script>
+<script>
+(async () => {
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+  if (localStorage.getItem('rota_theme') === 'dark') document.body.classList.add('dark-mode');
+  initNavDropdown();
+  // Do NOT call initNotifDot() here — this page IS the notifications page.
+  // It opens its own WebSocket below and clears the dot at load time.
+
+  const user = getUser();
+  if (!user) { clearSession(); return; }
+
+  let notifications = [];
+  let currentTab = 'all';
+
+  const TYPE_CONFIG = {
+    task_assigned:           { icon: 'clipboard-list', cls: 'task',     tab: 'tasks'     },
+    task_completed:          { icon: 'check-circle',   cls: 'task',     tab: 'tasks'     },
+    request_created:         { icon: 'file-plus',      cls: 'request',  tab: 'requests'  },
+    request_updated:         { icon: 'refresh-cw',     cls: 'request',  tab: 'requests'  },
+    purchase_funded:         { icon: 'shopping-bag',   cls: 'purchase', tab: 'purchases' },
+    shopping_item_added:     { icon: 'plus-circle',    cls: 'shopping', tab: 'shopping'  },
+    shopping_item_purchased: { icon: 'package-check',  cls: 'shopping', tab: 'shopping'  },
+    member_kicked:           { icon: 'user-x',         cls: 'default',  tab: 'all'       },
+  };
+
+  const ALL_TABS = ['tasks', 'requests', 'purchases', 'shopping'];
+
+  function tabFor(type) { return TYPE_CONFIG[type]?.tab || 'all'; }
+
+  function timeAgo(dateStr) {
+    const diff = Math.floor((Date.now() - new Date(dateStr)) / 1000);
+    if (diff < 60)    return 'Just now';
+    if (diff < 3600)  return Math.floor(diff / 60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+    return Math.floor(diff / 86400) + 'd ago';
+  }
+
+  function escapeHtml(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function updateBadges() {
+    let totalUnread = 0;
+    for (const tab of ALL_TABS) {
+      const count = notifications.filter(n => !n.read && tabFor(n.type) === tab).length;
+      const el = document.getElementById('badge-' + tab);
+      if (el) { el.textContent = count; el.classList.toggle('zero', count === 0); }
+      totalUnread += count;
+    }
+    // 'all' badge = sum of all unread
+    const allEl = document.getElementById('badge-all');
+    if (allEl) { allEl.textContent = totalUnread; allEl.classList.toggle('zero', totalUnread === 0); }
+    document.getElementById('unreadCount').textContent =
+      totalUnread > 0 ? `${totalUnread} unread` : 'All caught up';
+  }
+
+  function render() {
+    updateBadges();
+    const list = document.getElementById('notifList');
+
+    const filtered = currentTab === 'all'
+      ? notifications
+      : notifications.filter(n => tabFor(n.type) === currentTab);
+
+    if (filtered.length === 0) {
+      list.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">🔔</div>
+          <p>No notifications here yet.</p>
+        </div>`;
+      return;
+    }
+
+    list.innerHTML = filtered.map(n => {
+      const cfg = TYPE_CONFIG[n.type] || { icon: 'bell', cls: 'default' };
+      return `
+        <div class="notif-item ${n.read ? '' : 'unread'}" onclick="markRead('${n.id}')">
+          <div class="notif-icon ${cfg.cls}">
+            <i data-lucide="${cfg.icon}" style="width:18px;height:18px;"></i>
+          </div>
+          <div class="notif-body">
+            <div class="notif-msg">${escapeHtml(n.message)}</div>
+            <div class="notif-time">${timeAgo(n.created_at)}</div>
+          </div>
+          <div class="notif-actions">
+            <button class="notif-delete" onclick="deleteNotif(event,'${n.id}')" title="Delete">
+              <i data-lucide="trash-2" style="width:14px;height:14px;"></i>
+            </button>
+          </div>
+        </div>`;
+    }).join('');
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+  }
+
+  window.switchTab = (tab) => {
+    currentTab = tab;
+    document.querySelectorAll('.notif-tab').forEach(b => {
+      b.classList.toggle('active', b.dataset.tab === tab);
+    });
+    render();
+  };
+
+  async function load() {
+    try {
+      const data = await apiFetch('/notifications');
+      notifications = data.notifications || [];
+      render();
+    } catch {
+      toast('Could not load notifications', 'error');
+    }
+  }
+
+  window.markRead = async (id) => {
+    const n = notifications.find(x => x.id === id);
+    if (!n || n.read) return; // already read, skip API call
+    try {
+      await apiFetch(`/notifications/${id}/read`, { method: 'PUT' });
+      n.read = true;
+      render();
+    } catch {}
+  };
+
+  window.markAllRead = async () => {
+    try {
+      await apiFetch('/notifications/read-all', { method: 'PUT' });
+      notifications.forEach(n => n.read = true);
+      render();
+      toast('All notifications marked as read', 'success');
+    } catch {
+      toast('Could not mark all as read', 'error');
+    }
+  };
+
+  window.deleteNotif = async (event, id) => {
+    event.stopPropagation();
+    try {
+      await apiFetch(`/notifications/${id}`, { method: 'DELETE' });
+      notifications = notifications.filter(n => n.id !== id);
+      render();
+    } catch {
+      toast('Could not delete notification', 'error');
+    }
+  };
+
+  window.clearAll = async () => {
+    if (!confirm('Clear all notifications?')) return;
+    try {
+      await apiFetch('/notifications/clear-all', { method: 'DELETE' });
+      notifications = [];
+      render();
+      toast('All notifications cleared', 'success');
+    } catch {
+      toast('Could not clear notifications', 'error');
+    }
+  };
+
+  // WebSocket — prepend new notifications instantly
+  const token = getToken();
+  const householdId = localStorage.getItem('rota_household_id');
+  if (token && householdId) {
+    const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://')
+      + location.host + '/ws?token=' + encodeURIComponent(token)
+      + '&householdId=' + encodeURIComponent(householdId);
+    const ws = new WebSocket(wsUrl);
+    ws.onmessage = (e) => {
+      const msg = JSON.parse(e.data);
+      if (msg.type === 'NOTIFICATION_CREATED' && String(msg.forUserId) === String(user.id)) {
+        notifications.unshift(msg.notification);
+        render();
+      }
+    };
+  }
+
+  await load();
+  // Clear the nav dot — user is on this page so they've seen the notifications
+  const bellLink = document.querySelector('a[href="notifications.html"].nav-item');
+  if (bellLink) bellLink.classList.remove('has-notif');
+})();
+</script>
+</body>
+</html>

@@ -125,23 +125,37 @@ const handleRequestPhotos = (req, res, next) => {
   });
 };
 
-// ── Proof photo (single) ──────────────────────────────────────────────────────
+// ── Proof photos (before + after) ────────────────────────────────────────────
 const uploadProof = multer({
   storage:   memStorage,
   fileFilter,
-  limits: { fileSize: MAX_BYTES, files: 1 }
-}).single('proof');
+  limits: { fileSize: MAX_BYTES, files: 2 }
+}).fields([
+  { name: 'proof_before', maxCount: 1 },
+  { name: 'proof_after',  maxCount: 1 },
+]);
 
 const handleProofUpload = (req, res, next) => {
   uploadProof(req, res, async (err) => {
     if (err) {
-      if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'Proof photo must be under 5 MB.' });
+      if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'Each proof photo must be under 5 MB.' });
       return res.status(400).json({ error: err.message || 'Upload failed.' });
     }
     try {
-      req.proofUrl = req.file
-        ? await uploadToR2(req.file.buffer, req.file.mimetype, 'proofs')
-        : null;
+      const files      = req.files || {};
+      const beforeFile = files.proof_before?.[0];
+      const afterFile  = files.proof_after?.[0];
+
+      if (!beforeFile || !afterFile) {
+        return res.status(400).json({ error: 'Both before and after photos are required.' });
+      }
+
+      const [beforeUrl, afterUrl] = await Promise.all([
+        uploadToR2(beforeFile.buffer, beforeFile.mimetype, 'proofs'),
+        uploadToR2(afterFile.buffer,  afterFile.mimetype,  'proofs'),
+      ]);
+
+      req.proofUrl = JSON.stringify({ before: beforeUrl, after: afterUrl });
       next();
     } catch (uploadErr) {
       next(uploadErr);

@@ -1,5 +1,6 @@
 const pool = require('../db/pool');
 const { broadcast } = require('../websocket/manager');
+const { sendNotification } = require('./notificationController');
 
 // =============================================================================
 // DATA MODEL — Assignment vs Completion are completely separate concerns
@@ -79,6 +80,15 @@ const createTask = async (req, res, next) => {
 
     await client.query('COMMIT');
     broadcast(householdId, { type: 'TASK_CREATED', taskId });
+
+    // Notify each assignee
+    const creatorName = req.user.name || 'Someone';
+    for (const userId of assignees) {
+      if (String(userId) === String(req.user.id)) continue;
+      await sendNotification(userId, householdId, 'task_assigned',
+        `${creatorName} assigned you a task: "${title}"`);
+    }
+
     res.status(201).json({ task: task.rows[0] });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -269,13 +279,27 @@ const toggleTaskStatus = async (req, res, next) => {
     );
     const assignees = assigneesResult.rows;
 
-    // 6. Get household_id for broadcast
+    // 6. Get household_id + task title for broadcast and notifications
     const taskInfo = await client.query(
-      'SELECT household_id FROM tasks WHERE id = $1', [taskId]
+      'SELECT household_id, title FROM tasks WHERE id = $1', [taskId]
     );
     const householdId = taskInfo.rows[0]?.household_id;
+    const taskTitle   = taskInfo.rows[0]?.title || 'a task';
 
     await client.query('COMMIT');
+
+    // Notify all OTHER household members when someone completes their part
+    if (householdId && myCompleted) {
+      const memberRows = await pool.query(
+        'SELECT user_id FROM household_members WHERE household_id = $1', [householdId]
+      );
+      const completedByName = req.user.name || 'Someone';
+      for (const row of memberRows.rows) {
+        if (String(row.user_id) === String(req.user.id)) continue;
+        await sendNotification(row.user_id, householdId, 'task_completed',
+          `${completedByName} completed "${taskTitle}"`);
+      }
+    }
 
     // 7. Broadcast updated state to all household members
     //    Include full assignees so clients update without a re-fetch

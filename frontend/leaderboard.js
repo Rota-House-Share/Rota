@@ -4,6 +4,8 @@
 
 document.addEventListener('DOMContentLoaded', async () => {
     if (typeof lucide !== 'undefined') lucide.createIcons();
+    initNotifDot();
+    initNavDropdown();
 
     // Apply dark mode before first paint
     if (localStorage.getItem('rota_theme') === 'dark') {

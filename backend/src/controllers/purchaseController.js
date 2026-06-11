@@ -1,5 +1,6 @@
 const pool = require('../db/pool');
 const { broadcast } = require('../websocket/manager');
+const { sendNotification } = require('./notificationController');
 
 // =============================================================================
 // PURCHASES / CONTRIBUTIONS (Spec 4)
@@ -129,24 +130,22 @@ const contributeToPurchase = async (req, res, next) => {
       [newTotal.toFixed(2), newStatus, purchaseId]
     );
 
-    // Notify the household when funded
+    await client.query('COMMIT');
+
+    // Notify the household when funded (after commit so sendNotification can use pool safely)
     if (newStatus === 'funded') {
-      const memberIds = await client.query(
+      const memberIds = await pool.query(
         'SELECT user_id FROM household_members WHERE household_id = $1',
         [householdId]
       );
       for (const m of memberIds.rows) {
-        await client.query(
-          `INSERT INTO notifications (user_id, household_id, type, message, data)
-           VALUES ($1,$2,'purchase_funded',$3,$4)`,
-          [m.user_id, householdId,
-           `Purchase "${purchase.item_name}" is fully funded!`,
-           JSON.stringify({ purchase_id: purchaseId })]
+        await sendNotification(
+          m.user_id, householdId, 'purchase_funded',
+          `Purchase "${purchase.item_name}" is fully funded!`,
+          { purchase_id: purchaseId }
         );
       }
     }
-
-    await client.query('COMMIT');
     broadcast(householdId, {
       type: 'PURCHASE_UPDATED',
       purchase: updated.rows[0],

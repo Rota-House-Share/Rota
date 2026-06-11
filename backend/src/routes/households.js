@@ -15,6 +15,7 @@ const { createBill, getBills, getBillSummary } = require('../controllers/billCon
 const {
   createPurchase, listPurchases, contributeToPurchase, cancelPurchase, deletePurchase
 } = require('../controllers/purchaseController');
+const { listItems, addItem, toggleItem, deleteItem } = require('../controllers/shoppingController');
 router.use(authenticate);
 
 // Leaderboard must come BEFORE /:householdId to avoid param collision
@@ -74,5 +75,11 @@ router.post('/:householdId/purchases',                        requireHouseholdMe
 router.post('/:householdId/purchases/:purchaseId/contribute', requireHouseholdMember, contributeToPurchase);
 router.post('/:householdId/purchases/:purchaseId/cancel',     requireHouseholdMember, cancelPurchase);
 router.delete('/:householdId/purchases/:purchaseId',          requireHouseholdMember, deletePurchase);
+
+// Shopping list
+router.get   ('/:householdId/shopping',                requireHouseholdMember, listItems);
+router.post  ('/:householdId/shopping',                requireHouseholdMember, addItem);
+router.patch ('/:householdId/shopping/:itemId/toggle', requireHouseholdMember, toggleItem);
+router.delete('/:householdId/shopping/:itemId',        requireHouseholdMember, deleteItem);
 
 module.exports = router;

@@ -6,6 +6,7 @@
     <title>Rota | My Account</title>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="groupDashboard.css">
     <link rel="stylesheet" href="profile.css">
     <link rel="stylesheet" href="toast.css">
 </head>
@@ -13,16 +14,15 @@
     <div class="app-wrapper">
         <!-- Sidebar Navigation -->
         <nav class="sidebar">
-            <div class="brand">
-                <div class="logo-sq">R</div>
-            </div>
+            <div class="logo-sq">R</div>
             <div class="nav-links">
-                <!-- FIX (Bug #2): Household icon goes through requireMembership on Dashboard load, so if you've left, it bounces to home.html with a toast. -->
-                <a href="Groupdashboard.html" class="nav-item" title="Dashboard"><i data-lucide="layout-dashboard"></i></a>
+                <a href="Groupdashboard.html" class="nav-item" title="Dashboard">
+                    <i data-lucide="layout-dashboard"></i>
+                </a>
                 <a href="leaderboard.html" class="nav-item" title="Leaderboard"><i data-lucide="trophy"></i></a>
-                <a href="profile.html" class="nav-item active" title="Account"><i data-lucide="user"></i></a>
+                <a href="profile.html"     class="nav-item active" title="Account"><i data-lucide="user"></i></a>
             </div>
-            <button class="logout-btn" title="Logout"><i data-lucide="log-out"></i></button>
+            <button onclick="clearSession()" class="logout-btn" title="Logout"><i data-lucide="log-out"></i></button>
         </nav>
 
         <!-- Main Content -->

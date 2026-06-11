@@ -116,6 +116,86 @@ async function requireAuth() {
   return true;
 }
 
+// -- Notification dot on bell nav icon ----------------------------------------
+// Call once per page after the DOM is ready. Injects the dot span, fetches
+// unread count, and keeps it live via WebSocket.
+async function initNotifDot() {
+  const bellLink = document.querySelector('a[href="notifications.html"].nav-item');
+  if (!bellLink) return;
+
+  // Inject dot span if not already present
+  if (!bellLink.querySelector('.notif-dot')) {
+    const dot = document.createElement('span');
+    dot.className = 'notif-dot';
+    bellLink.appendChild(dot);
+  }
+
+  const setDot = (hasUnread) => {
+    bellLink.classList.toggle('has-notif', hasUnread);
+  };
+
+  // Initial fetch
+  try {
+    const data = await apiFetch('/notifications');
+    const unread = (data.notifications || []).some(n => !n.read);
+    setDot(unread);
+  } catch { /* silent */ }
+
+  // Keep live via WebSocket — only light up for THIS user's notifications
+  const token = getToken();
+  const householdId = getHouseholdId();
+  const currentUser = getUser();
+  if (!token || !householdId) return;
+
+  const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://')
+    + location.host + '/ws?token=' + encodeURIComponent(token)
+    + '&householdId=' + encodeURIComponent(householdId);
+
+  const ws = new WebSocket(wsUrl);
+  ws.onmessage = (e) => {
+    try {
+      const msg = JSON.parse(e.data);
+      if (msg.type === 'NOTIFICATION_CREATED'
+          && currentUser
+          && String(msg.forUserId) === String(currentUser.id)) {
+        setDot(true);
+      }
+    } catch {}
+  };
+}
+
+// -- Sidebar nav dropdown (Dashboard group) -----------------------------------
+// Auto-opens when on any dashboard sub-page. Clicking Dashboard navigates there.
+function initNavDropdown() {
+  const sub    = document.getElementById('dashSubMenu');
+  const toggle = document.getElementById('navDashToggle');
+  if (!sub || !toggle) return;
+
+  const href      = location.href.toLowerCase();
+  const onSubPage = ['requests','notifications'].some(p => href.includes(p));
+  const onDash    = href.includes('groupdashboard') || onSubPage;
+
+  if (onDash) {
+    // Suppress transition on page load so it doesn't animate open as you arrive
+    sub.classList.add('no-anim', 'open');
+    toggle.classList.add('active');
+    // Re-enable after browser has fully painted — manual toggles will animate smoothly
+    setTimeout(() => sub.classList.remove('no-anim'), 50);
+  }
+}
+
+// Called inline from onclick="dashNavClick(event)" on the dashboard icon.
+function dashNavClick(e) {
+  const href = location.href.toLowerCase();
+  if (!href.includes('groupdashboard')) return;
+  e.preventDefault();
+  const sub    = document.getElementById('dashSubMenu');
+  const toggle = document.getElementById('navDashToggle');
+  if (!sub || !toggle) return;
+  const isOpen = sub.classList.toggle('open');
+  toggle.classList.toggle('active', isOpen);
+}
+
 // -- Misc helpers -------------------------------------------------------------
 
 // FIX (Bug #7): Real-time relative date. Renders "2 days ago", "3 months ago",

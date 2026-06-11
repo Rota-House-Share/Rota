@@ -192,10 +192,17 @@
 <nav class="sidebar">
   <div class="logo-sq">R</div>
   <div class="nav-links">
-    <a href="Groupdashboard.html" class="nav-item" title="Dashboard"><i data-lucide="layout-dashboard"></i></a>
-    <a href="requests.html" class="nav-item active" title="Requests"><i data-lucide="file-plus"></i></a>
+    <div class="nav-group">
+      <a href="Groupdashboard.html" id="navDashToggle" class="nav-item" title="Dashboard" onclick="dashNavClick(event)">
+        <i data-lucide="layout-dashboard"></i>
+      </a>
+      <div class="nav-sub" id="dashSubMenu">
+        <a href="requests.html"      class="nav-item nav-sub-item active" title="Requests"><i data-lucide="file-plus"></i></a>
+        <a href="notifications.html" class="nav-item nav-sub-item" title="Notifications"><i data-lucide="bell"></i></a>
+      </div>
+    </div>
     <a href="leaderboard.html" class="nav-item" title="Leaderboard"><i data-lucide="trophy"></i></a>
-    <a href="profile.html" class="nav-item" title="Account"><i data-lucide="user"></i></a>
+    <a href="profile.html"     class="nav-item" title="Account"><i data-lucide="user"></i></a>
   </div>
   <button onclick="window.location.href='Groupdashboard.html'" class="logout-btn" title="Back"><i data-lucide="log-out"></i></button>
 </nav>
@@ -267,6 +274,7 @@
   <div id="detailContent"></div>
 </div>
 
+<script src="api.js"></script>
 <script>
 const MAINTENANCE_CATS = ['Broken Appliance','Plumbing Issue','Electrical Problem','Furniture Damage','General Repair'];
 const COMPLAINT_CATS   = ['Noise Complaint','Cleanliness Issue','Shared-Space Dispute','Rule Violation','Other'];
@@ -668,6 +676,8 @@ async function init() {
 
 init();
 lucide.createIcons();
+initNotifDot();
+initNavDropdown();
 </script>
 </body>
 </html>

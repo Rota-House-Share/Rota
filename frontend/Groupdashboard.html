@@ -13,10 +13,17 @@
     <nav class="sidebar">
         <div class="logo-sq">R</div>
         <div class="nav-links">
-            <a href="Groupdashboard.html" class="nav-item active" title="Dashboard"><i data-lucide="layout-dashboard"></i></a>
-            <a href="requests.html" class="nav-item" title="Requests"><i data-lucide="file-plus"></i></a>
+            <div class="nav-group">
+                <button type="button" id="navDashToggle" class="nav-item active" title="Dashboard" onclick="dashNavClick(event)">
+                    <i data-lucide="layout-dashboard"></i>
+                </button>
+                <div class="nav-sub" id="dashSubMenu">
+                    <a href="requests.html"      class="nav-item nav-sub-item" title="Requests"><i data-lucide="file-plus"></i></a>
+                    <a href="notifications.html" class="nav-item nav-sub-item" title="Notifications"><i data-lucide="bell"></i></a>
+                </div>
+            </div>
             <a href="leaderboard.html" class="nav-item" title="Leaderboard"><i data-lucide="trophy"></i></a>
-            <a href="profile.html" class="nav-item" title="Account"><i data-lucide="user"></i></a>
+            <a href="profile.html"     class="nav-item" title="Account"><i data-lucide="user"></i></a>
         </div>
         <button onclick="clearSession()" class="logout-btn" title="Logout"><i data-lucide="log-out"></i></button>
     </nav>
@@ -92,6 +99,8 @@
         <div class="modal-content">
             <h3>Add a Task</h3>
             <input type="text" id="newChoreTitle" placeholder="What needs doing?">
+            <textarea id="newChoreDesc" placeholder="Description (optional) — specific instructions or requirements..." rows="3"
+              style="width:100%;margin-top:10px;padding:10px;border:1px solid #e2e8f0;border-radius:10px;font-family:inherit;font-size:.9rem;resize:vertical;box-sizing:border-box;"></textarea>
             <p style="font-size:.82rem;color:#888;margin:10px 0 4px;">Assign to (leave all unchecked to assign everyone):</p>
             <div id="choreAssignees" style="
                 max-height:180px;overflow-y:auto;

@@ -236,6 +236,21 @@ const schema = `
   CREATE INDEX IF NOT EXISTS idx_contributions_purchase  ON purchase_contributions(purchase_id);
   CREATE INDEX IF NOT EXISTS idx_requests_household      ON requests(household_id);
   CREATE INDEX IF NOT EXISTS idx_request_comments        ON request_comments(request_id);
+
+  -- ---------------------------------------------------------------------------
+  -- shopping_items — shared household shopping list
+  -- ---------------------------------------------------------------------------
+  CREATE TABLE IF NOT EXISTS shopping_items (
+    id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    household_id UUID NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+    added_by     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name         TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'tobuy' CHECK (status IN ('tobuy','purchased')),
+    purchased_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    purchased_at TIMESTAMPTZ,
+    created_at   TIMESTAMPTZ DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS idx_shopping_household ON shopping_items(household_id);
 `;
 
 // =============================================================================
@@ -327,6 +342,19 @@ const upgrades = `
   ALTER TABLE requests DROP COLUMN IF EXISTS priority;
   CREATE INDEX IF NOT EXISTS idx_requests_household ON requests(household_id);
   CREATE INDEX IF NOT EXISTS idx_request_comments   ON request_comments(request_id);
+
+  -- shopping_items (safe to re-run)
+  CREATE TABLE IF NOT EXISTS shopping_items (
+    id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    household_id UUID NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+    added_by     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name         TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'tobuy' CHECK (status IN ('tobuy','purchased')),
+    purchased_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    purchased_at TIMESTAMPTZ,
+    created_at   TIMESTAMPTZ DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS idx_shopping_household ON shopping_items(household_id);
 `;
 
 (async () => {

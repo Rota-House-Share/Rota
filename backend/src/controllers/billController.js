@@ -1,5 +1,6 @@
 const pool = require('../db/pool');
 const { broadcast } = require('../websocket/manager');
+const { sendNotification } = require('./notificationController');
 
 // POST /api/households/:householdId/bills
 // FIX (Schema 5.4): bills.paid_by is GONE. Who paid is implicit in
@@ -47,12 +48,9 @@ const createBill = async (req, res, next) => {
         [billId, s.user_id, s.amount, paid, paid ? new Date() : null]
       );
       if (!paid) {
-        await client.query(
-          `INSERT INTO notifications (user_id, household_id, type, message, data)
-           VALUES ($1,$2,'bill_created',$3,$4)`,
-          [s.user_id, householdId, `New bill: ${title} – you owe £${s.amount}`,
-            JSON.stringify({ bill_id: billId, amount: s.amount })]
-        );
+        await sendNotification(s.user_id, householdId, 'bill_created',
+          `New bill: ${title} – you owe £${s.amount}`,
+          { bill_id: billId, amount: s.amount });
       }
     }
 

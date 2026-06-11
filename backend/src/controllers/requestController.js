@@ -1,8 +1,9 @@
 const pool = require('../db/pool');
 const { broadcast } = require('../websocket/manager');
+const { sendNotification } = require('./notificationController');
 
 // GET /api/requests?householdId=xxx
-async function getRequests(req, res) {
+async function getRequests(req, res, next) {
   const { householdId } = req.query;
   if (!householdId) return res.status(400).json({ error: 'householdId required' });
   try {
@@ -15,14 +16,11 @@ async function getRequests(req, res) {
       [householdId]
     );
     res.json(rows);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server error' });
-  }
+  } catch (err) { next(err); }
 }
 
 // POST /api/requests
-async function createRequest(req, res) {
+async function createRequest(req, res, next) {
   const { householdId, type, category, title, description } = req.body;
   if (!householdId || !type || !category || !title)
     return res.status(400).json({ error: 'householdId, type, category, title required' });
@@ -36,11 +34,20 @@ async function createRequest(req, res) {
     );
     const newRequest = { ...rows[0], created_by_name: req.user.name };
     broadcast(householdId, { type: 'REQUEST_CREATED', request: newRequest });
+
+    // Notify all admins about the new request
+    const admins = await pool.query(
+      `SELECT user_id FROM household_members WHERE household_id=$1 AND role='admin'`,
+      [householdId]
+    );
+    for (const a of admins.rows) {
+      if (String(a.user_id) === String(req.user.id)) continue; // skip if requester is admin
+      await sendNotification(a.user_id, householdId, 'request_created',
+        `${req.user.name} submitted a ${category} request: "${title}"`);
+    }
+
     res.status(201).json(newRequest);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server error' });
-  }
+  } catch (err) { next(err); }
 }
 
 // Middleware: only admin of the request's household can change status
@@ -57,14 +64,11 @@ async function adminStatusGuard(req, res, next) {
       return res.status(403).json({ error: 'Only admins can update request status' });
     req.requestHouseholdId = r.rows[0].household_id;
     next();
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server error' });
-  }
+  } catch (err) { next(err); }
 }
 
 // PATCH /api/requests/:id/status  (admin only — enforced in route)
-async function updateStatus(req, res) {
+async function updateStatus(req, res, next) {
   const { id } = req.params;
   const { status } = req.body;
   const valid = ['In Progress', 'Completed'];
@@ -75,16 +79,21 @@ async function updateStatus(req, res) {
       [status, id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Not found' });
-    broadcast(rows[0].household_id, { type: 'REQUEST_STATUS_CHANGED', requestId: id, status });
-    res.json(rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server error' });
-  }
+    const updated = rows[0];
+    broadcast(updated.household_id, { type: 'REQUEST_STATUS_CHANGED', requestId: id, status });
+
+    // Notify the requester their request status changed
+    if (String(updated.created_by) !== String(req.user.id)) {
+      await sendNotification(updated.created_by, updated.household_id, 'request_updated',
+        `Your request "${updated.title}" was marked ${status} by ${req.user.name}`);
+    }
+
+    res.json(updated);
+  } catch (err) { next(err); }
 }
 
 // DELETE /api/requests/:id  (admin only)
-async function deleteRequest(req, res) {
+async function deleteRequest(req, res, next) {
   const { id } = req.params;
   try {
     const r = await pool.query(`SELECT household_id FROM requests WHERE id=$1`, [id]);
@@ -98,14 +107,11 @@ async function deleteRequest(req, res) {
     await pool.query(`DELETE FROM requests WHERE id=$1`, [id]);
     broadcast(r.rows[0].household_id, { type: 'REQUEST_DELETED', requestId: id });
     res.json({ success: true });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server error' });
-  }
+  } catch (err) { next(err); }
 }
 
 // GET /api/requests/:id/comments
-async function getComments(req, res) {
+async function getComments(req, res, next) {
   const { id } = req.params;
   try {
     const { rows } = await pool.query(
@@ -117,14 +123,11 @@ async function getComments(req, res) {
       [id]
     );
     res.json(rows);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server error' });
-  }
+  } catch (err) { next(err); }
 }
 
 // POST /api/requests/:id/comments
-async function addComment(req, res) {
+async function addComment(req, res, next) {
   const { id } = req.params;
   const { message } = req.body;
   if (!message) return res.status(400).json({ error: 'message required' });
@@ -144,10 +147,7 @@ async function addComment(req, res) {
       });
     }
     res.status(201).json({ ...rows[0], user_name: req.user.name });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server error' });
-  }
+  } catch (err) { next(err); }
 }
 
 module.exports = { getRequests, createRequest, adminStatusGuard, updateStatus, deleteRequest, getComments, addComment };

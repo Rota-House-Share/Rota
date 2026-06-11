@@ -6,23 +6,27 @@
     <title>Rota | Global Leaderboard</title>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="groupDashboard.css">
     <link rel="stylesheet" href="leaderboard.css">
     <link rel="stylesheet" href="toast.css">
 </head>
 <body>
-    <nav class="main-nav">
-        <div class="brand-small">R</div>
+    <nav class="sidebar">
+        <div class="logo-sq">R</div>
         <div class="nav-links">
-            <a href="Groupdashboard.html">Dashboard</a>
-            <a href="leaderboard.html" class="active">Leaderboard</a>
-            <!-- FIX (Bug #2): Plain link to profile.html. No interceptor, no
-                 rota_profile_redirect flag, no forced bounce through the
-                 loading screen. The previous interceptor was the literal
-                 mechanism by which leaving a household → opening profile →
-                 any nav click put the user back into the old household. -->
-            <a href="profile.html">Account</a>
+            <div class="nav-group">
+                <a href="Groupdashboard.html" id="navDashToggle" class="nav-item" title="Dashboard" onclick="dashNavClick(event)">
+                    <i data-lucide="layout-dashboard"></i>
+                </a>
+                <div class="nav-sub" id="dashSubMenu">
+                    <a href="requests.html"      class="nav-item nav-sub-item" title="Requests"><i data-lucide="file-plus"></i></a>
+                    <a href="notifications.html" class="nav-item nav-sub-item" title="Notifications"><i data-lucide="bell"></i></a>
+                </div>
+            </div>
+            <a href="leaderboard.html" class="nav-item active" title="Leaderboard"><i data-lucide="trophy"></i></a>
+            <a href="profile.html"     class="nav-item" title="Account"><i data-lucide="user"></i></a>
         </div>
-        <button onclick="clearSession()" class="logout-btn">Logout</button>
+        <button onclick="clearSession()" class="logout-btn" title="Logout"><i data-lucide="log-out"></i></button>
     </nav>
 
     <main class="app-container">
